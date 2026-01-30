@@ -40,7 +40,11 @@ export default function Home() {
       }
     } catch (err) {
       console.error('Failed to fetch prices:', err);
-      setError('Failed to fetch prices. Is the oracle node running?');
+      if (prices.length === 0) {
+        setError('Connecting to Oracle Node... (Starting up on Render)');
+      } else {
+        setError('Syncing issue. Checking backend status...');
+      }
     } finally {
       setLoading(false);
     }
@@ -229,7 +233,7 @@ export default function Home() {
               <div>
                 <p className="text-red-400 font-medium">{error}</p>
                 <p className="text-sm text-gray-500 mt-2">
-                  Make sure the oracle node is running: <code className="bg-white/5 px-2 py-1 rounded text-gray-400">cd oracle-node && npm run dev</code>
+                  The backend service might be waking up from sleep on Render. Please wait a moment while it initializes.
                 </p>
               </div>
             </div>
@@ -240,21 +244,19 @@ export default function Home() {
         <div className="flex items-center gap-2 mb-8">
           <button
             onClick={() => setActiveTab('prices')}
-            className={`px-6 py-3 rounded-xl font-medium transition-all ${
-              activeTab === 'prices'
+            className={`px-6 py-3 rounded-xl font-medium transition-all ${activeTab === 'prices'
                 ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/20'
                 : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
+              }`}
           >
             Live Prices
           </button>
           <button
             onClick={() => setActiveTab('analytics')}
-            className={`px-6 py-3 rounded-xl font-medium transition-all ${
-              activeTab === 'analytics'
+            className={`px-6 py-3 rounded-xl font-medium transition-all ${activeTab === 'analytics'
                 ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/20'
                 : 'text-gray-400 hover:text-white hover:bg-white/5'
-            }`}
+              }`}
           >
             Analytics
           </button>

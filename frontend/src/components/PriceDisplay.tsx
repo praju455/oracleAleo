@@ -81,9 +81,9 @@ export const PriceDisplay: FC<PriceDisplayProps> = ({ prices, loading, providerC
   if (prices.length === 0) {
     return (
       <div className="glass-card rounded-2xl p-12 text-center">
-        <div className="text-4xl mb-4">📊</div>
-        <p className="text-gray-400">No price data available</p>
-        <p className="text-sm text-gray-500 mt-2">Make sure the oracle node is running</p>
+        <div className="text-4xl mb-4 animate-pulse">📡</div>
+        <p className="text-gray-400 font-medium">Connecting to Oracle Infrastructure...</p>
+        <p className="text-sm text-gray-500 mt-2">The oracle node on Render may be initializing or waking up from sleep. This usually takes 30-60 seconds.</p>
       </div>
     );
   }
@@ -114,9 +114,8 @@ export const PriceDisplay: FC<PriceDisplayProps> = ({ prices, loading, providerC
           return (
             <div
               key={price.pair}
-              className={`glass-card glass-card-hover rounded-2xl p-6 relative overflow-hidden group cursor-pointer transition-all duration-300 hover:scale-[1.02] ${
-                isHalted ? 'ring-2 ring-red-500/50' : ''
-              }`}
+              className={`glass-card glass-card-hover rounded-2xl p-6 relative overflow-hidden group cursor-pointer transition-all duration-300 hover:scale-[1.02] ${isHalted ? 'ring-2 ring-red-500/50' : ''
+                }`}
               onClick={() => router.push(`/token/${price.pair.replace('/', '-').toLowerCase()}`)}
             >
               {/* Background glow effect */}
@@ -145,11 +144,10 @@ export const PriceDisplay: FC<PriceDisplayProps> = ({ prices, loading, providerC
                 <div className="flex flex-col items-end gap-1">
                   {/* Signature Badge */}
                   {price.signatureVerified !== undefined && (
-                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                      price.signatureVerified
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${price.signatureVerified
                         ? 'bg-emerald-500/20 text-emerald-400'
                         : 'bg-orange-500/20 text-orange-400'
-                    }`}>
+                      }`}>
                       {price.signatureVerified ? (
                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -162,18 +160,16 @@ export const PriceDisplay: FC<PriceDisplayProps> = ({ prices, loading, providerC
                     </div>
                   )}
                   {/* Status Badge */}
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                    isHalted
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isHalted
                       ? 'bg-red-500/20 text-red-400'
                       : isVeryStale
                         ? 'bg-red-500/20 text-red-400'
                         : isStale
                           ? 'bg-yellow-500/20 text-yellow-400'
                           : 'bg-green-500/20 text-green-400'
-                  }`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${
-                      isHalted ? 'bg-red-400' : isVeryStale ? 'bg-red-400' : isStale ? 'bg-yellow-400' : 'bg-green-400 animate-pulse'
-                    }`} />
+                    }`}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${isHalted ? 'bg-red-400' : isVeryStale ? 'bg-red-400' : isStale ? 'bg-yellow-400' : 'bg-green-400 animate-pulse'
+                      }`} />
                     {isHalted ? 'HALTED' : formatAge(age)}
                   </div>
                 </div>
