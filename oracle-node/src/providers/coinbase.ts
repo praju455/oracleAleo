@@ -36,7 +36,7 @@ export class CoinbaseProvider implements PriceProvider {
     } catch (error) {
       let errorMessage = 'Unknown error';
       if (axios.isAxiosError(error)) {
-        errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
+        errorMessage = (error as any).response?.data?.errors?.[0]?.message || error.message;
       } else if (error instanceof Error) {
         errorMessage = error.message;
       }

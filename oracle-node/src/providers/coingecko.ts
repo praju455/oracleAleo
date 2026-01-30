@@ -61,8 +61,9 @@ export class CoinGeckoProvider implements PriceProvider {
       CoinGeckoProvider.pendingBatch = null;
       let errorMessage = 'Unknown error';
       if (axios.isAxiosError(error)) {
-        errorMessage = error.response?.data?.error || error.message;
-        if (error.response?.status === 429) {
+        const anyError = error as any;
+        errorMessage = anyError.response?.data?.error || error.message;
+        if (anyError.response?.status === 429) {
           logger.error(`CoinGecko: Rate limit hit (429). Entering 2-minute cooldown.`);
           CoinGeckoProvider.cooldownUntil = Date.now() + 120000; // 2 minute cooldown
         }

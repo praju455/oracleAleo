@@ -39,7 +39,7 @@ export class BinanceProvider implements PriceProvider {
     } catch (error) {
       let errorMessage = 'Unknown error';
       if (axios.isAxiosError(error)) {
-        errorMessage = error.response?.data?.msg || error.message;
+        errorMessage = (error as any).response?.data?.msg || error.message;
       } else if (error instanceof Error) {
         errorMessage = error.message;
       }
