@@ -3,7 +3,7 @@ services:
     name: aleo-oracle-node
     runtime: node
     rootDir: oracle-node
-    buildCommand: npm install && npm run build
+    buildCommand: npm run build:render
     startCommand: npm start
     envVars:
       - key: NODE_VERSION

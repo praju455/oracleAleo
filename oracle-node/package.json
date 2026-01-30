@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn src/server.ts",
     "build": "tsc",
+    "build:render": "npm install && tsc",
     "start": "node dist/server.js",
     "test": "jest"
   },
