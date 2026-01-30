@@ -1,0 +1,13 @@
+{
+  "program": "lending_protocol_v2.aleo",
+  "version": "1.0.0",
+  "description": "Production-ready private lending protocol with dynamic interest rates, oracle integration, and flash loans",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "network": "testnet"
+    }
+  ]
+}

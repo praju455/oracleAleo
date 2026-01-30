@@ -1,0 +1,7 @@
+{
+  "program": "price_oracle_v2.aleo",
+  "version": "1.0.0",
+  "description": "Production-ready privacy-preserving price oracle with multi-operator consensus for Aleo DeFi",
+  "license": "MIT",
+  "dependencies": []
+}

@@ -1,0 +1,21 @@
+{
+  "name": "aleo-oracle-relayer",
+  "version": "1.0.0",
+  "description": "Auto-submits oracle prices to Aleo blockchain",
+  "main": "dist/relayer.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn src/relayer.ts",
+    "build": "tsc",
+    "start": "node dist/relayer.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "typescript": "^5.3.3",
+    "ts-node-dev": "^2.0.0"
+  }
+}

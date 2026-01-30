@@ -1,0 +1,7 @@
+{
+  "program": "multisig_admin_v1.aleo",
+  "version": "1.0.0",
+  "description": "Multi-signature admin contract for secure protocol administration",
+  "license": "MIT",
+  "dependencies": []
+}

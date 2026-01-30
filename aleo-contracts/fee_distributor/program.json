@@ -1,0 +1,13 @@
+{
+  "program": "fee_distributor_v1.aleo",
+  "version": "1.0.0",
+  "description": "Fee collection and distribution system for Aleo Oracle operators",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "network": "testnet"
+    }
+  ]
+}
