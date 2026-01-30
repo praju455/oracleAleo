@@ -5,8 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn src/server.ts",
-    "build": "tsc",
-    "build:render": "npm install && tsc",
+    "build": "npm install && tsc",
     "start": "node dist/server.js",
     "test": "jest"
   },
@@ -16,7 +15,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "@types/node": "^20.10.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
