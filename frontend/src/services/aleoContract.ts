@@ -6,7 +6,7 @@ export const ORACLE_PROGRAM_ID = process.env.NEXT_PUBLIC_ORACLE_PROGRAM_ID || 'p
 export const FEE_DISTRIBUTOR_PROGRAM_ID = process.env.NEXT_PUBLIC_FEE_DISTRIBUTOR_PROGRAM_ID || 'fee_distributor_v1.aleo';
 
 // API endpoint for Aleo
-const ALEO_API_URL = process.env.NEXT_PUBLIC_ALEO_API_URL || 'https://api.explorer.aleo.org/v1/testnet';
+const ALEO_API_URL = (process.env.NEXT_PUBLIC_ALEO_API_URL || 'https://api.explorer.aleo.org/v1/testnet').replace(/\/$/, '');
 const NETWORK = WalletAdapterNetwork.TestnetBeta;
 
 // Market IDs (mapped to oracle pair IDs)

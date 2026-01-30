@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_ORACLE_API_URL || 'http://localhost:3000';
+const API_BASE_URL = (process.env.NEXT_PUBLIC_ORACLE_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 export interface TWAPData {
   '1h': number;
