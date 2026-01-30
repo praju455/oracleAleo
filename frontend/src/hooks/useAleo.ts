@@ -97,7 +97,7 @@ export const useAleo = () => {
         1_000_000
       );
 
-      const txId = await requestTransaction!(transaction);
+      const txId: string | { transactionId?: string } | any = await requestTransaction!(transaction);
 
       return {
         success: true,
@@ -145,7 +145,7 @@ export const useAleo = () => {
         500_000
       );
 
-      const txId = await requestTransaction!(transaction);
+      const txId: string | { transactionId?: string } | any = await requestTransaction!(transaction);
 
       return {
         success: true,
@@ -186,7 +186,7 @@ export const useAleo = () => {
         500_000
       );
 
-      const txId = await requestTransaction!(transaction);
+      const txId: string | { transactionId?: string } | any = await requestTransaction!(transaction);
 
       return { success: true, transactionId: typeof txId === 'string' ? txId : txId?.transactionId || 'submitted' };
     } catch (error) {

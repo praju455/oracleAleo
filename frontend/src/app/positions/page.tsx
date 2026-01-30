@@ -36,7 +36,7 @@ const tokenColors: { [key: string]: string } = {
 };
 
 export default function PositionsPage() {
-  const { connected, publicKey, requestTransaction } = useWallet();
+  const { connected, publicKey, requestTransaction, requestRecordPlaintexts } = useWallet();
   const [prices, setPrices] = useState<PriceData[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
@@ -246,10 +246,9 @@ export default function PositionsPage() {
                   </div>
                   <div className="glass rounded-xl p-4">
                     <p className="text-sm text-gray-500 mb-1">Collateral Ratio</p>
-                    <p className={`text-xl font-bold ${
-                      position.currentRatio >= 200 ? 'text-green-400' :
+                    <p className={`text-xl font-bold ${position.currentRatio >= 200 ? 'text-green-400' :
                       position.currentRatio >= 150 ? 'text-yellow-400' : 'text-red-400'
-                    }`}>
+                      }`}>
                       {position.currentRatio.toFixed(1)}%
                     </p>
                   </div>
@@ -264,9 +263,9 @@ export default function PositionsPage() {
                   </Link>
                   <button
                     onClick={async () => {
-                      if (!publicKey || !requestTransaction) return;
+                      if (!publicKey || !requestTransaction || !requestRecordPlaintexts) return;
                       try {
-                        const walletCtx = { publicKey, requestTransaction };
+                        const walletCtx = { publicKey, requestTransaction, requestRecordPlaintexts };
                         const result = await aleoContract.repay(walletCtx, position.id, position.borrowedAmount);
                         if (result.success) {
                           alert(`Repay submitted! TX: ${result.transactionId}`);
