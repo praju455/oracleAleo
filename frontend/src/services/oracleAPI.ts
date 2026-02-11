@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_ORACLE_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+const RELAYER_BASE_URL = (process.env.NEXT_PUBLIC_RELAYER_URL || 'http://localhost:3001').replace(/\/$/, '');
 
 export interface TWAPData {
   '1h': number;
@@ -24,15 +25,6 @@ export interface CircuitBreakerStatus {
   remainingMs?: number;
 }
 
-export interface SignatureData {
-  signature?: string;
-  signatureR?: string;
-  signatureS?: string;
-  nonce?: string;
-  messageHash?: string;
-  signatureVerified?: boolean;
-}
-
 export interface PriceData {
   pair: string;
   price: number;
@@ -45,11 +37,6 @@ export interface PriceData {
   age?: number;
   twap?: TWAPData;
   circuitBreaker?: CircuitBreakerStatus;
-  // Extended signature data
-  signatureR?: string;
-  signatureS?: string;
-  nonce?: string;
-  messageHash?: string;
   signatureVerified?: boolean;
 }
 
@@ -107,13 +94,6 @@ export interface PriceStats {
   dataPoints: number;
 }
 
-export interface TrendData {
-  trend: 'up' | 'down' | 'sideways';
-  strength: number;
-  support: number;
-  resistance: number;
-}
-
 export interface PriceCandle {
   timestamp: number;
   open: number;
@@ -139,7 +119,7 @@ export interface AnalysisResponse {
     '1h': PriceStats | null;
     '24h': PriceStats | null;
   };
-  trend: TrendData | null;
+  trend: { trend: 'up' | 'down' | 'sideways'; strength: number; support: number; resistance: number } | null;
   twap: {
     '1h': { value: number; deviation: number };
     '24h': { value: number; deviation: number };
@@ -156,6 +136,53 @@ export interface AnalysisResponse {
     candles5m: PriceCandle[];
   };
   historyCount: number;
+  timestamp: number;
+}
+
+// ===== Relayer Types =====
+export interface RelayerHealth {
+  status: string;
+  uptime: number;
+  operator: string;
+  balance: number;
+  lastSubmission: number | null;
+  stats: {
+    totalSubmissions: number;
+    successfulSubmissions: number;
+    failedSubmissions: number;
+    lastSuccessfulSubmission: number;
+  };
+  pairs: {
+    [pair: string]: {
+      lastPrice?: number;
+      lastTimestamp?: number;
+      pending: boolean;
+    };
+  };
+}
+
+export interface RelayerPairStatus {
+  pair: string;
+  pairId: number;
+  lastPrice: number | null;
+  lastScaledPrice: string | null;
+  lastTimestamp: number | null;
+  lastTxId: string | null;
+  pending: boolean;
+  pendingTxId: string | null;
+  submissionCount: number;
+}
+
+export interface RelayerStatus {
+  pairs: RelayerPairStatus[];
+  errors: { timestamp: number; pair: string; message: string }[];
+  stats: {
+    totalSubmissions: number;
+    successfulSubmissions: number;
+    failedSubmissions: number;
+    lastSuccessfulSubmission: number;
+  };
+  uptime: number;
   timestamp: number;
 }
 
@@ -192,12 +219,6 @@ export const oracleAPI = {
     return response.data;
   },
 
-  // Resume circuit breaker for a pair (admin)
-  async resumeCircuitBreaker(pair: string): Promise<{ success: boolean; pair: string; message: string }> {
-    const response = await axios.post(`${API_BASE_URL}/circuit-breaker/${pair.replace('/', '-')}/resume`);
-    return response.data;
-  },
-
   // Get health status
   async getHealth(): Promise<HealthStatus> {
     const response = await axios.get(`${API_BASE_URL}/health`);
@@ -210,15 +231,15 @@ export const oracleAPI = {
     return response.data;
   },
 
-  // Get price statistics for a time window
-  async getStats(pair: string, window: string = '1h'): Promise<{ pair: string; window: string; stats: PriceStats; trend: TrendData | null; timestamp: number }> {
+  // Get price statistics
+  async getStats(pair: string, window: string = '1h'): Promise<{ pair: string; window: string; stats: PriceStats; trend: any; timestamp: number }> {
     const response = await axios.get(`${API_BASE_URL}/price/${pair.replace('/', '-')}/stats`, {
       params: { window }
     });
     return response.data;
   },
 
-  // Get OHLC candles for charting
+  // Get OHLC candles
   async getCandles(pair: string, interval: string = '1m', limit: number = 100): Promise<{ pair: string; interval: string; candles: PriceCandle[]; count: number; timestamp: number }> {
     const response = await axios.get(`${API_BASE_URL}/price/${pair.replace('/', '-')}/candles`, {
       params: { interval, limit }
@@ -226,11 +247,23 @@ export const oracleAPI = {
     return response.data;
   },
 
-  // Get comprehensive analysis for a pair
+  // Get comprehensive analysis
   async getAnalysis(pair: string): Promise<AnalysisResponse> {
     const response = await axios.get(`${API_BASE_URL}/price/${pair.replace('/', '-')}/analysis`);
     return response.data;
-  }
+  },
+
+  // ===== Relayer Endpoints =====
+
+  async getRelayerHealth(): Promise<RelayerHealth> {
+    const response = await axios.get(`${RELAYER_BASE_URL}/health`, { timeout: 5000 });
+    return response.data;
+  },
+
+  async getRelayerStatus(): Promise<RelayerStatus> {
+    const response = await axios.get(`${RELAYER_BASE_URL}/status`, { timeout: 5000 });
+    return response.data;
+  },
 };
 
 export default oracleAPI;

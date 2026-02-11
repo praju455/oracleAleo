@@ -1,4 +1,5 @@
 import axios from 'axios';
+import http from 'http';
 import dotenv from 'dotenv';
 import winston from 'winston';
 import {
@@ -39,6 +40,8 @@ const config = {
 
   minSourceCount: parseInt(process.env.MIN_SOURCE_COUNT || '3'),
 
+  healthPort: parseInt(process.env.HEALTH_PORT || '3001'),
+
   pairIds: {
     'ETH/USD': 1,
     'BTC/USD': 2,
@@ -53,7 +56,6 @@ const config = {
   } as { [key: string]: number },
 
   operatorPrivateKey: process.env.OPERATOR_PRIVATE_KEY || '',
-  operatorAddress: process.env.OPERATOR_ADDRESS || '',
 };
 
 // ===== TYPES =====
@@ -63,8 +65,6 @@ interface PriceData {
   timestamp: number;
   sourceCount: number;
   sources: string[];
-  signature?: string;          // Real Aleo signature string
-  operatorAddress?: string;
 }
 
 interface SubmittedPrice {
@@ -75,13 +75,24 @@ interface SubmittedPrice {
   sourceCount: number;
 }
 
+interface ErrorEntry {
+  timestamp: number;
+  pair: string;
+  message: string;
+}
+
 // ===== STATE =====
 let account: Account;
+let operatorAddress: string;
 let networkClient: AleoNetworkClient;
 let programManager: ProgramManager;
 
+const startTime = Date.now();
 const lastSubmitted: Map<string, SubmittedPrice> = new Map();
 const pendingTransactions: Map<string, string> = new Map();
+const submissionCounts: Map<string, number> = new Map();
+const recentErrors: ErrorEntry[] = [];
+const MAX_ERRORS = 50;
 
 const stats = {
   totalSubmissions: 0,
@@ -90,14 +101,15 @@ const stats = {
   lastSuccessfulSubmission: 0,
 };
 
+function addError(pair: string, message: string) {
+  recentErrors.unshift({ timestamp: Date.now(), pair, message });
+  if (recentErrors.length > MAX_ERRORS) recentErrors.pop();
+}
+
 // ===== VALIDATION =====
 function validateConfig(): boolean {
   if (!config.operatorPrivateKey) {
     logger.error('OPERATOR_PRIVATE_KEY is required. Set it in .env file.');
-    return false;
-  }
-  if (!config.operatorAddress) {
-    logger.error('OPERATOR_ADDRESS is required. Set it in .env file.');
     return false;
   }
   return true;
@@ -109,11 +121,7 @@ async function initializeAleoSdk(): Promise<boolean> {
     logger.info('Initializing Aleo SDK...');
 
     account = new Account({ privateKey: config.operatorPrivateKey });
-
-    if (account.address().to_string() !== config.operatorAddress) {
-      logger.error('Private key does not match operator address');
-      return false;
-    }
+    operatorAddress = account.address().to_string();
 
     networkClient = new AleoNetworkClient(config.aleoRpcUrl);
     const keyProvider = new AleoKeyProvider();
@@ -127,7 +135,7 @@ async function initializeAleoSdk(): Promise<boolean> {
     );
     programManager.setAccount(account);
 
-    logger.info(`Aleo SDK initialized — operator: ${config.operatorAddress}`);
+    logger.info(`Aleo SDK initialized — operator: ${operatorAddress}`);
     return true;
   } catch (error) {
     logger.error(`Failed to initialize Aleo SDK: ${error}`);
@@ -172,8 +180,6 @@ async function fetchPriceFromOracle(pair: string): Promise<PriceData | null> {
       timestamp: data.timestamp,
       sourceCount: data.sourceCount || data.sources?.length || config.minSourceCount,
       sources: data.sources || [],
-      signature: data.signature,
-      operatorAddress: data.operatorAddress,
     };
 
     const validation = validatePriceData(priceData, pair);
@@ -190,60 +196,6 @@ async function fetchPriceFromOracle(pair: string): Promise<PriceData | null> {
 }
 
 // ===== BLOCKCHAIN SUBMISSION =====
-
-// Primary path: submit with real Aleo signature
-async function submitSignedPrice(
-  pair: string,
-  priceData: PriceData
-): Promise<string | null> {
-  const pairId = config.pairIds[pair];
-  if (!pairId) {
-    logger.error(`Unknown pair: ${pair}`);
-    return null;
-  }
-
-  // If no signature from oracle-node, sign it ourselves
-  let signature = priceData.signature;
-  if (!signature) {
-    const message = `{ pair_id: ${pairId}u64, price: ${priceData.scaledPrice}u128, timestamp: ${priceData.timestamp}u64, source_count: ${priceData.sourceCount}u8 }`;
-    const sig = account.sign(message);
-    signature = sig.to_string();
-  }
-
-  logger.info(`Submitting ${pair} signed price: ${priceData.scaledPrice}`);
-
-  try {
-    const inputs = [
-      `${pairId}u64`,
-      `${priceData.scaledPrice}u128`,
-      `${priceData.timestamp}u64`,
-      `${priceData.sourceCount}u8`,
-      signature,
-    ];
-
-    const txId = await programManager.execute(
-      config.oracleProgramId,
-      'submit_signed_price',
-      inputs,
-      config.baseFee,
-      config.priorityFee
-    );
-
-    if (txId) {
-      logger.info(`Signed price tx submitted: ${txId}`);
-      stats.totalSubmissions++;
-      pendingTransactions.set(pair, txId);
-      return txId;
-    }
-    return null;
-  } catch (error: any) {
-    logger.error(`Signed submission failed for ${pair}: ${error.message || error}`);
-    // Fall back to simple mode
-    return submitPriceSimple(pair, priceData.scaledPrice, priceData.timestamp);
-  }
-}
-
-// Fallback: simple submission (no signature, no round)
 async function submitPriceSimple(
   pair: string,
   scaledPrice: string,
@@ -255,7 +207,7 @@ async function submitPriceSimple(
     return null;
   }
 
-  logger.info(`Submitting ${pair} price (simple mode): ${scaledPrice}`);
+  logger.info(`Submitting ${pair} price: ${scaledPrice}`);
 
   try {
     const inputs = [
@@ -273,15 +225,18 @@ async function submitPriceSimple(
     );
 
     if (txId) {
-      logger.info(`Simple tx submitted: ${txId}`);
+      logger.info(`TX submitted: ${txId}`);
       stats.totalSubmissions++;
       pendingTransactions.set(pair, txId);
+      submissionCounts.set(pair, (submissionCounts.get(pair) || 0) + 1);
       return txId;
     }
     return null;
   } catch (error: any) {
-    logger.error(`Simple submission failed for ${pair}: ${error.message || error}`);
+    const msg = error.message || String(error);
+    logger.error(`Submission failed for ${pair}: ${msg}`);
     stats.failedSubmissions++;
+    addError(pair, msg);
     return null;
   }
 }
@@ -312,6 +267,7 @@ async function monitorPendingTransactions(): Promise<void> {
       logger.warn(`TX failed: ${txId} (${pair})`);
       pendingTransactions.delete(pair);
       lastSubmitted.delete(pair);
+      addError(pair, `TX failed: ${txId}`);
     }
   }
 }
@@ -346,7 +302,7 @@ function shouldUpdate(pair: string, newPrice: number, newTimestamp: number): boo
 // ===== BALANCE CHECK =====
 async function getOperatorBalance(): Promise<bigint> {
   try {
-    const balance = await networkClient.getAccount(config.operatorAddress);
+    const balance = await networkClient.getAccount(operatorAddress);
     return BigInt(balance?.microcredits || 0);
   } catch {
     return BigInt(0);
@@ -376,8 +332,7 @@ async function relayerLoop(): Promise<void> {
       if (!priceData) continue;
 
       if (shouldUpdate(pair, priceData.price, priceData.timestamp)) {
-        // Try signed submission first, falls back to simple internally
-        const txId = await submitSignedPrice(pair, priceData);
+        const txId = await submitPriceSimple(pair, priceData.scaledPrice, priceData.timestamp);
 
         if (txId) {
           lastSubmitted.set(pair, {
@@ -393,6 +348,7 @@ async function relayerLoop(): Promise<void> {
       }
     } catch (error) {
       logger.error(`Error processing ${pair}: ${error}`);
+      addError(pair, String(error));
     }
   }
 
@@ -422,6 +378,82 @@ async function healthCheck(): Promise<boolean> {
   }
 }
 
+// ===== HEALTH HTTP SERVER =====
+function startHealthServer(): void {
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (req.url === '/health' && req.method === 'GET') {
+      const balance = await getOperatorBalance();
+      const pairsStatus: { [pair: string]: { lastPrice?: number; lastTimestamp?: number; pending: boolean } } = {};
+      for (const pair of Object.keys(config.pairIds)) {
+        const last = lastSubmitted.get(pair);
+        pairsStatus[pair] = {
+          lastPrice: last?.price,
+          lastTimestamp: last?.timestamp,
+          pending: pendingTransactions.has(pair),
+        };
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        status: 'running',
+        uptime: Date.now() - startTime,
+        operator: operatorAddress,
+        balance: Number(balance) / 1_000_000,
+        lastSubmission: stats.lastSuccessfulSubmission || null,
+        stats,
+        pairs: pairsStatus,
+      }));
+      return;
+    }
+
+    if (req.url === '/status' && req.method === 'GET') {
+      const pairDetails: any[] = [];
+      for (const [pair, pairId] of Object.entries(config.pairIds)) {
+        const last = lastSubmitted.get(pair);
+        pairDetails.push({
+          pair,
+          pairId,
+          lastPrice: last?.price ?? null,
+          lastScaledPrice: last?.scaledPrice ?? null,
+          lastTimestamp: last?.timestamp ?? null,
+          lastTxId: last?.txId ?? null,
+          pending: pendingTransactions.has(pair),
+          pendingTxId: pendingTransactions.get(pair) ?? null,
+          submissionCount: submissionCounts.get(pair) || 0,
+        });
+      }
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        pairs: pairDetails,
+        errors: recentErrors.slice(0, 10),
+        stats,
+        uptime: Date.now() - startTime,
+        timestamp: Date.now(),
+      }));
+      return;
+    }
+
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  server.listen(config.healthPort, () => {
+    logger.info(`Health server listening on :${config.healthPort}`);
+  });
+}
+
 // ===== STATISTICS =====
 function printStats(): void {
   logger.info('=== RELAYER STATISTICS ===');
@@ -439,7 +471,7 @@ function printStats(): void {
 async function main(): Promise<void> {
   logger.info('='.repeat(60));
   logger.info('  ALEO ORACLE RELAYER v2');
-  logger.info('  Real Aleo Signature Verification');
+  logger.info('  Chainlink-Style Automated Submission');
   logger.info('='.repeat(60));
 
   if (!validateConfig()) {
@@ -455,12 +487,14 @@ async function main(): Promise<void> {
   logger.info(`  Oracle: ${config.oracleNodeUrl}`);
   logger.info(`  Program: ${config.oracleProgramId}`);
   logger.info(`  Network: ${config.aleoNetwork}`);
-  logger.info(`  Operator: ${config.operatorAddress}`);
+  logger.info(`  Operator: ${operatorAddress}`);
   logger.info(`  Deviation: ${config.deviationThreshold * 100}%`);
   logger.info(`  Heartbeat: ${config.heartbeatInterval / 1000}s`);
   logger.info(`  Poll: ${config.pollInterval / 1000}s`);
   logger.info(`  Pairs: ${Object.keys(config.pairIds).length}`);
   logger.info('='.repeat(60));
+
+  startHealthServer();
 
   await healthCheck();
   await relayerLoop();
