@@ -1,80 +1,79 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
-import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
+import axios from 'axios';
 
-const NETWORK = WalletAdapterNetwork.TestnetBeta;
+const ALEO_RPC_URL = process.env.NEXT_PUBLIC_ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet';
 const ORACLE_PROGRAM_ID = process.env.NEXT_PUBLIC_ORACLE_PROGRAM_ID || 'price_oracle_v2.aleo';
 
-export interface TransactionResult {
-  success: boolean;
-  transactionId?: string;
-  error?: string;
+export interface OnChainPrice {
+  price: bigint;
+  timestamp: number;
+  raw: string;
+}
+
+export interface OperatorInfo {
+  address: string;
+  stake: bigint;
+  raw: string;
 }
 
 export const useAleo = () => {
-  const { publicKey, requestTransaction, connected } = useWallet();
   const [loading, setLoading] = useState(false);
 
-  /**
-   * Submit price via submit_price_simple (bypasses consensus rounds).
-   *
-   * On-chain signature:
-   *   submit_price_simple(pair_id: u64, price: u128, timestamp: u64)
-   *
-   * self.caller authenticates the operator — the wallet signs the transaction,
-   * so no separate signature parameter is needed.
-   *
-   * Price must be scaled by 10^8 (PRICE_DECIMALS) before calling.
-   */
-  const submitPriceSimple = useCallback(async (
-    pairId: number,
-    scaledPrice: bigint,
-    timestamp: number
-  ): Promise<TransactionResult> => {
-    if (!connected || !publicKey || !requestTransaction) {
-      return { success: false, error: 'Wallet not connected' };
-    }
-
+  const readOnChainPrice = useCallback(async (pairId: number): Promise<OnChainPrice | null> => {
     setLoading(true);
-
     try {
-      const transaction = Transaction.createTransaction(
-        publicKey!,
-        NETWORK,
-        ORACLE_PROGRAM_ID,
-        'submit_price_simple',
-        [
-          `${pairId}u64`,
-          `${scaledPrice}u128`,
-          `${timestamp}u64`
-        ],
-        500_000
+      const response = await axios.get(
+        `${ALEO_RPC_URL}/program/${ORACLE_PROGRAM_ID}/mapping/consensus_prices/${pairId}u64`
       );
+      const raw = response.data;
+      if (!raw || raw === 'null') return null;
 
-      const txId: string | { transactionId?: string } | any = await requestTransaction!(transaction);
+      // Parse the on-chain struct — format varies by RPC but typically:
+      // { price: 250050000000u128, timestamp: 1700000000u64, ... }
+      const priceMatch = raw.match(/price:\s*(\d+)u128/);
+      const tsMatch = raw.match(/timestamp:\s*(\d+)u64/);
 
       return {
-        success: true,
-        transactionId: typeof txId === 'string' ? txId : txId?.transactionId || 'submitted',
+        price: priceMatch ? BigInt(priceMatch[1]) : BigInt(0),
+        timestamp: tsMatch ? parseInt(tsMatch[1]) : 0,
+        raw: typeof raw === 'string' ? raw : JSON.stringify(raw),
       };
-    } catch (error) {
-      console.error('Submit price transaction failed:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Transaction failed'
-      };
+    } catch {
+      return null;
     } finally {
       setLoading(false);
     }
-  }, [connected, publicKey, requestTransaction]);
+  }, []);
+
+  const getOperatorInfo = useCallback(async (address: string): Promise<OperatorInfo | null> => {
+    setLoading(true);
+    try {
+      const response = await axios.get(
+        `${ALEO_RPC_URL}/program/${ORACLE_PROGRAM_ID}/mapping/registered_operators/${address}`
+      );
+      const raw = response.data;
+      if (!raw || raw === 'null') return null;
+
+      const stakeMatch = raw.match(/stake:\s*(\d+)u64/);
+
+      return {
+        address,
+        stake: stakeMatch ? BigInt(stakeMatch[1]) : BigInt(0),
+        raw: typeof raw === 'string' ? raw : JSON.stringify(raw),
+      };
+    } catch {
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   return {
-    publicKey,
-    connected,
     loading,
-    submitPriceSimple,
+    readOnChainPrice,
+    getOperatorInfo,
   };
 };
 
