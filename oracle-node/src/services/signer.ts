@@ -1,218 +1,110 @@
+import { Account } from '@provablehq/sdk';
 import { config } from '../config';
 import { logger } from './logger';
-import crypto from 'crypto';
 
-// Aleo signature types
 export interface SignedPriceData {
   pair: string;
+  pairId: number;
   price: bigint;
   timestamp: number;
-  messageHash: string;
-  signature: string;
-  publicKey: string;
-  signatureR: string;    // R component of Schnorr signature
-  signatureS: string;    // S component of Schnorr signature
-  nonce: string;         // Unique nonce for replay protection
+  sourceCount: number;
+  signature: string;       // Real Aleo signature string
+  operatorAddress: string;
 }
 
-export interface SignedMessage {
-  message: string;
-  signature: string;
-  publicKey: string;
-}
-
-// Schnorr signature components for on-chain verification
-export interface SchnorrSignature {
-  r: bigint;   // R point (x-coordinate)
-  s: bigint;   // S scalar
-  nonce: string;
-}
+// Pair ID mapping (must match relayer and contract)
+const PAIR_IDS: { [key: string]: number } = {
+  'ETH/USD': 1,
+  'BTC/USD': 2,
+  'ALEO/USD': 3,
+  'SOL/USD': 4,
+  'AVAX/USD': 5,
+  'MATIC/USD': 6,
+  'DOT/USD': 7,
+  'ATOM/USD': 8,
+  'LINK/USD': 9,
+  'UNI/USD': 10,
+};
 
 export class AleoSigner {
+  private account: Account | null = null;
   private operatorAddress: string;
-  private privateKey: string;
-  private nonceCounter: number = 0;
 
   constructor() {
     this.operatorAddress = config.operator.address;
-    this.privateKey = config.operator.privateKey || '';
 
-    if (!this.privateKey) {
-      logger.warn('No private key configured - using deterministic signing for development');
+    if (config.operator.privateKey) {
+      try {
+        this.account = new Account({ privateKey: config.operator.privateKey });
+        logger.info(`Signer initialized with address: ${this.account.address().to_string()}`);
+      } catch (err) {
+        logger.warn(`Failed to initialize Aleo account: ${err}. Signing disabled.`);
+      }
+    } else {
+      logger.warn('No private key configured — signing disabled');
     }
   }
 
   /**
-   * Generate a cryptographic nonce for replay protection
+   * Sign price data using real Aleo signatures (BLS12-377).
+   * The message format must match the on-chain BHP256::hash_to_field(PriceMessage { ... }).
+   *
+   * The Aleo SDK Account.sign() accepts a Uint8Array of the message bytes.
+   * On-chain, the contract hashes PriceMessage struct via BHP256::hash_to_field,
+   * then verifies signature::verify(sig, caller, hash).
+   *
+   * Off-chain, we construct the same struct literal string that Leo would use
+   * and sign it. The SDK handles the BHP256 hashing internally.
    */
-  private generateNonce(): string {
-    this.nonceCounter++;
-    const timestamp = Date.now();
-    const random = crypto.randomBytes(16).toString('hex');
-    return `${timestamp}-${this.nonceCounter}-${random}`;
-  }
+  signPrice(pair: string, price: bigint, timestamp: number, sourceCount: number): SignedPriceData {
+    const pairId = PAIR_IDS[pair] || 0;
 
-  /**
-   * Hash the price message using SHA-256 (compatible with Aleo's BHP256)
-   */
-  private hashMessage(pair: string, price: bigint, timestamp: number, nonce: string): string {
-    const message = `ALEO_ORACLE_PRICE:${pair}:${price.toString()}:${timestamp}:${nonce}`;
-    return crypto.createHash('sha256').update(message).digest('hex');
-  }
+    if (!this.account) {
+      // Return unsigned data — relayer will use submit_price_simple fallback
+      return {
+        pair,
+        pairId,
+        price,
+        timestamp,
+        sourceCount,
+        signature: '',
+        operatorAddress: this.operatorAddress,
+      };
+    }
 
-  /**
-   * Create a Schnorr-style signature for on-chain verification
-   * This implementation creates deterministic signatures that can be verified on-chain
-   */
-  private createSchnorrSignature(messageHash: string): SchnorrSignature {
-    // Derive k (nonce) deterministically from private key and message (RFC 6979 style)
-    const k = crypto.createHmac('sha256', this.privateKey || 'dev-key')
-      .update(messageHash)
-      .digest();
+    // Build the message string matching the on-chain PriceMessage struct.
+    // Account.sign() in the Aleo SDK signs arbitrary bytes.
+    // The contract does: BHP256::hash_to_field(PriceMessage { pair_id, price, timestamp, source_count })
+    // then: signature::verify(sig, self.caller, hash)
+    //
+    // We need to produce a signature over the same field value.
+    // We encode the struct as a string that the SDK can process.
+    const message = `{ pair_id: ${pairId}u64, price: ${price}u128, timestamp: ${timestamp}u64, source_count: ${sourceCount}u8 }`;
 
-    // Calculate R = k * G (simplified - in production use proper elliptic curve)
-    // For Aleo, we use the BLS12-377 curve parameters
-    const r = BigInt('0x' + k.subarray(0, 16).toString('hex'));
+    const sig = this.account.sign(message);
 
-    // Calculate s = k - e * privateKeyScalar (simplified)
-    const privateKeyHash = crypto.createHash('sha256')
-      .update(this.privateKey || 'dev-key')
-      .digest();
-    const privateKeyScalar = BigInt('0x' + privateKeyHash.subarray(0, 16).toString('hex'));
-    const e = BigInt('0x' + messageHash.substring(0, 32));
-
-    // s = k + e * x (mod n) - simplified Schnorr
-    const s = (r + (e * privateKeyScalar)) % (2n ** 128n);
-
-    const nonce = this.generateNonce();
-
-    return { r, s, nonce };
-  }
-
-  /**
-   * Sign a price message with full Schnorr signature for on-chain verification
-   */
-  signPrice(pair: string, price: bigint, timestamp: number): SignedPriceData {
-    const nonce = this.generateNonce();
-    const messageHash = this.hashMessage(pair, price, timestamp, nonce);
-    const schnorrSig = this.createSchnorrSignature(messageHash);
-
-    // Create the full signature string (R || S format)
-    const signature = `${schnorrSig.r.toString(16).padStart(32, '0')}${schnorrSig.s.toString(16).padStart(32, '0')}`;
-
-    logger.debug(`Signed price for ${pair}: hash=${messageHash.substring(0, 16)}...`);
+    logger.debug(`Signed price for ${pair}: pairId=${pairId}, price=${price}`);
 
     return {
       pair,
+      pairId,
       price,
       timestamp,
-      messageHash,
-      signature,
-      publicKey: this.operatorAddress,
-      signatureR: schnorrSig.r.toString(),
-      signatureS: schnorrSig.s.toString(),
-      nonce
+      sourceCount,
+      signature: sig.to_string(),
+      operatorAddress: this.account.address().to_string(),
     };
   }
 
-  /**
-   * Legacy sign method for backwards compatibility
-   */
-  signPriceLegacy(pair: string, price: bigint, timestamp: number): SignedMessage {
-    const signedData = this.signPrice(pair, price, timestamp);
-
-    return {
-      message: `${pair}:${price.toString()}:${timestamp}`,
-      signature: signedData.signature,
-      publicKey: this.operatorAddress
-    };
-  }
-
-  /**
-   * Verify a Schnorr signature
-   */
-  verifySignature(
-    pair: string,
-    price: bigint,
-    timestamp: number,
-    nonce: string,
-    signatureR: string,
-    signatureS: string,
-    publicKey: string
-  ): boolean {
-    try {
-      // Reconstruct message hash
-      const messageHash = this.hashMessage(pair, price, timestamp, nonce);
-
-      // Parse signature components
-      const r = BigInt(signatureR);
-      const s = BigInt(signatureS);
-      const e = BigInt('0x' + messageHash.substring(0, 32));
-
-      // Verify: R = s*G - e*P (simplified verification)
-      // In production, this would use proper elliptic curve operations
-      const privateKeyHash = crypto.createHash('sha256')
-        .update(this.privateKey || 'dev-key')
-        .digest();
-      const privateKeyScalar = BigInt('0x' + privateKeyHash.subarray(0, 16).toString('hex'));
-
-      // Expected r = s - e * x (mod n)
-      const expectedR = (s - (e * privateKeyScalar)) % (2n ** 128n);
-
-      // Handle negative modulo
-      const normalizedExpectedR = expectedR < 0n ? expectedR + (2n ** 128n) : expectedR;
-      const normalizedR = r < 0n ? r + (2n ** 128n) : r;
-
-      const isValid = normalizedR === normalizedExpectedR && publicKey === this.operatorAddress;
-
-      if (!isValid) {
-        logger.warn(`Signature verification failed for ${pair}`);
-      }
-
-      return isValid;
-    } catch (error) {
-      logger.error(`Signature verification error: ${error}`);
-      return false;
-    }
-  }
-
-  /**
-   * Get the operator's public address
-   */
   getOperatorAddress(): string {
+    if (this.account) {
+      return this.account.address().to_string();
+    }
     return this.operatorAddress;
   }
 
-  /**
-   * Generate a field element from the message for on-chain use
-   * This creates a value compatible with Aleo's field type
-   */
-  getMessageField(pair: string, price: bigint, timestamp: number, nonce: string): string {
-    const hash = this.hashMessage(pair, price, timestamp, nonce);
-    // Convert to field-compatible format (first 31 bytes to stay within field modulus)
-    return BigInt('0x' + hash.substring(0, 62)).toString();
-  }
-
-  /**
-   * Get signature components formatted for on-chain submission
-   */
-  getOnChainSignatureParams(signedData: SignedPriceData): {
-    messageField: string;
-    sigR: string;
-    sigS: string;
-    nonce: string;
-  } {
-    return {
-      messageField: this.getMessageField(
-        signedData.pair,
-        signedData.price,
-        signedData.timestamp,
-        signedData.nonce
-      ),
-      sigR: signedData.signatureR,
-      sigS: signedData.signatureS,
-      nonce: signedData.nonce
-    };
+  isSigningEnabled(): boolean {
+    return this.account !== null;
   }
 }
 

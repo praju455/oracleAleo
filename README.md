@@ -1,116 +1,108 @@
-# Aleo Privacy-Preserving Oracle
+# Aleo Price Oracle
 
-[![Aleo](https://img.shields.io/badge/Aleo-Blockchain-00D1FF?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkw0IDIwaDZsMi02aDRsMiA2aDZMMTIgMneiIGZpbGw9IiMwMEQxRkYiLz48L3N2Zz4=)](https://aleo.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
-[![Next.js](https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
-[![Status](https://img.shields.io/badge/Status-Phase_1_Complete-green?style=for-the-badge)](https://aleo-oracle.io)
+A decentralized price oracle for the Aleo blockchain with **real cryptographic signature verification** using Aleo's native `signature::verify`.
 
-A decentralized, privacy-preserving token price oracle for the Aleo blockchain. Optimized for **10 major assets** across **10 global exchanges**, featuring **Batch-Fetched CoinGecko pricing**, **TWAP (Time-Weighted Average Price)**, and **On-Chain Circuit Breaker Protection**.
+## Architecture
 
----
-
-## ⚡ Core Technical Specifications
-
-| Feature | Specification |
-|---------|---------------|
-| **Data Sources** | 10 Tier-1 Exchanges (Binance, Coinbase, Kraken, OKX, etc.) |
-| **Asset Pairs** | ETH, BTC, ALEO, SOL, AVAX, POL (formerly MATIC), DOT, ATOM, LINK, UNI |
-| **Aggregation** | Outlier-resistant Median Aggregation with 5% threshold |
-| **Refresh Rate** | 10s (Off-chain) \| 30s-300s (On-chain via Relayer) |
-| **Integrations** | Next.js 14 Frontend, Leo Smart Contracts, TypeScript Node |
-| **Privacy** | Zero-Knowledge collateral positions and private price consumption |
-
----
-
-## 🏗 Architecture Overview
-
-```mermaid
-graph TD
-    A[Global Exchanges x10] -->|REST/Websocket| B(Oracle Node)
-    B -->|Batch Aggregation| C{Median Filter}
-    C -->|Signed Data| D[REST API]
-    D -->|Polling| E(Relayer Service)
-    D -->|Live Data| F[Next.js Frontend]
-    E -->|Proof of Price| G[Aleo Smart Contract]
+```
+Exchanges (10+)  -->  Oracle Node  -->  Relayer  -->  Aleo Smart Contract
+  Binance              Aggregates       Signs &       signature::verify
+  Coinbase             Median filter    Submits       Circuit breaker
+  Kraken               TWAP calc        Monitors      Price history
+  OKX, Bybit...        REST API         Fallback      Consensus rounds
 ```
 
----
+**Oracle Node** — Fetches prices from 10 exchanges, removes outliers, computes median. Exposes REST API.
 
-## 🚀 Getting Started (WSL Recommended)
+**Relayer** — Polls oracle node, signs prices with `Account.sign()` from `@provablehq/sdk`, submits to on-chain contract.
 
-### 1. Prerequisites
-- **Node.js** v18+ 
-- **Leo CLI** installed (for contract development)
-- **WSL (Ubuntu)** - Required for stable build performance
+**Smart Contract** — Verifies signatures with `signature::verify(sig, caller, message)` using Aleo's native BLS12-377 cryptography. Includes circuit breaker protection, price history, and consensus rounds.
 
-### 2. Installation
-```bash
-# Clone the repository
-git clone https://github.com/your-repo/aleo-oracle.git
-cd aleo-oracle
+## Quick Start
 
-# Install all dependencies (Native WSL environment)
-cd oracle-node && npm install
-cd ../relayer && npm install
-cd ../frontend && npm install
-```
+### Prerequisites
+- Node.js v18+
+- Leo CLI (for contract development)
 
-### 3. Execution (Simultaneous Terminals)
-
-**Terminal 1: Oracle Node (The Brain)**
+### 1. Oracle Node
 ```bash
 cd oracle-node
+cp .env.example .env  # Configure operator keys
+npm install
 npm run dev
 ```
+Runs on `http://localhost:3000`. Check `GET /health` and `GET /prices`.
 
-**Terminal 2: Relayer (The Messenger)**
+### 2. Relayer
 ```bash
 cd relayer
+cp .env.example .env  # Set OPERATOR_PRIVATE_KEY and OPERATOR_ADDRESS
+npm install
 npm run dev
 ```
+Polls oracle node, signs prices, submits transactions to Aleo testnet.
 
-**Terminal 3: Frontend (the Window)**
+### 3. Frontend
 ```bash
 cd frontend
+cp .env.example .env
+npm install
 npm run dev
 ```
+Dashboard at `http://localhost:3001`.
 
-Visit `http://localhost:3001` to interact with the dashboard.
+## Contract
 
----
+**Program:** `price_oracle_v2.aleo`
 
-## 🛡 Security & Reliability Features
+### Key Functions
 
-### CoinGecko Batching & Cooldown
-The system implements a proprietary batching engine for CoinGecko. Instead of individual API calls, we perform **single-request fetches** to avoid rate limiting. If a `429` error is detected, the provider enters an automatic **2-minute cooldown** and falls back to stale cache data.
+| Function | Description |
+|----------|-------------|
+| `submit_signed_price` | Submit price with native Aleo `signature` type — verified on-chain via `signature::verify` |
+| `submit_price_simple` | Simple submission (no signature, no round) — for single-operator MVP |
+| `start_round` / `finalize_consensus` | Multi-operator consensus rounds with stake-weighted pricing |
+| `submit_twap` | Submit TWAP data (5m, 1h, 24h, 7d windows) |
+| `register_operator` | Admin registers operator by address + stake |
+| `pause` / `unpause` | Emergency pause |
 
-### Multi-Source Failover
-Prices require at least **3 valid sources** (2 for ALEO/USD). If an exchange goes down, the oracle automatically recalculates using the remaining active sources without downtime.
+### Signature Verification
 
-### On-Chain Circuit Breaker
-Every price submission is checked against the last on-chain value. If a single update exceeds **10% deviation**, the contract enters a **Halted** state, protecting consumer protocols (like Lending) from flash crashes or manipulation.
+The contract uses Aleo's **native signature type**:
 
----
+```leo
+async transition submit_signed_price(
+    public pair_id: u64,
+    public price: u128,
+    public timestamp: u64,
+    public source_count: u8,
+    public sig: signature     // Native Aleo signature
+) -> Future {
+    let message: field = BHP256::hash_to_field(
+        PriceMessage { pair_id, price, timestamp, source_count }
+    );
+    assert(signature::verify(sig, self.caller, message));
+    // ...
+}
+```
 
-## 📅 Roadmap: Phase 1 & Beyond
+Off-chain, the relayer signs with `Account.sign()` from `@provablehq/sdk`, producing a compatible BLS12-377 signature.
 
-### ✅ Phase 1: Heavy Expansion (Completed)
-- [x] Expanded to 10 trading pairs & 10 providers.
-- [x] Implemented TWAP (1h, 24h, 7d).
-- [x] Hardened CoinGecko rate limiting.
-- [x] Refactored Frontend for SSR & Wallet compatibility.
+## Supported Pairs
 
-### 🔥 Phase 2: DeFi Deep Integration (In Progress)
-- [ ] **Multi-Operator Consensus**: Median aggregation performed on-chain.
-- [ ] **Oracle SDK**: NPM package for 1-line integration into Aleo dApps.
-- [ ] **Perpetuals Engine**: Specific high-frequency feeds for leverage trading.
-- [ ] **Governance Portal**: DAO voting to resume halted circuit breakers.
+ETH/USD, BTC/USD, ALEO/USD, SOL/USD, AVAX/USD, MATIC/USD, DOT/USD, ATOM/USD, LINK/USD, UNI/USD
 
----
+## Data Sources
 
-## 📄 License
-Distributed under the MIT License. See `LICENSE` for more information.
+Binance, Coinbase, Kraken, Huobi, OKX, Gate.io, Bybit, CoinGecko, KuCoin, CryptoCompare
 
----
+## Tests
 
-Built for the **Aleo** community. Powered by Zero-Knowledge.
+```bash
+cd oracle-node && npm test
+cd relayer && npm test
+```
+
+## License
+
+MIT

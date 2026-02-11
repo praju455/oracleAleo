@@ -4,7 +4,6 @@ import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { PriceDisplay } from '@/components/PriceDisplay';
-import { Chatbot } from '@/components/Chatbot';
 import { oracleAPI, PriceData, HealthStatus, CircuitBreakerConfig, CircuitBreakerStatus } from '@/services/oracleAPI';
 
 interface CircuitBreakerData {
@@ -142,21 +141,14 @@ export default function Home() {
           </p>
 
           <div className="mt-10 flex flex-wrap justify-center gap-4 relative">
-            <Link href="/borrow" className="group px-8 py-4 rounded-2xl gradient-animated text-white font-bold hover:scale-105 transition-all shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 flex items-center gap-3 ripple">
+            <Link href="/stake" className="group px-8 py-4 rounded-2xl gradient-animated text-white font-bold hover:scale-105 transition-all shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 flex items-center gap-3 ripple">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
               </svg>
-              ZK Position Verification
+              Operator Dashboard
               <svg className="w-4 h-4 group-hover:translate-x-2 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
               </svg>
-            </Link>
-            <Link href="/stake" className="group px-8 py-4 rounded-2xl glass-card glass-card-hover text-white font-semibold flex items-center gap-3 border border-emerald-500/20 hover:border-emerald-500/40">
-              <svg className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-              Stake & Earn
-              <span className="px-2 py-0.5 text-xs bg-emerald-500/20 text-emerald-400 rounded-full">~8.5% APY</span>
             </Link>
           </div>
         </div>
@@ -329,7 +321,7 @@ export default function Home() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-gray-400">Signature Type</span>
-                    <span className="text-sm font-medium text-white">Schnorr</span>
+                    <span className="text-sm font-medium text-white">Aleo Native (BLS12-377)</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-gray-400">TWAP Windows</span>
@@ -424,29 +416,8 @@ export default function Home() {
           </section>
         )}
 
-        {/* Feature Cards */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-16">
-          <Link href="/borrow" className="group block">
-            <div className="glass-card glass-card-hover rounded-2xl p-8 h-full relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-indigo-500/20 to-transparent rounded-full blur-3xl group-hover:opacity-100 opacity-50 transition-opacity" />
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-lg shadow-indigo-500/20">
-                <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-bold text-white mb-3">Private Borrowing</h3>
-              <p className="text-gray-400 mb-6 leading-relaxed">
-                Deposit collateral and borrow stablecoins with privacy-preserving positions. Your data stays private with zero-knowledge proofs.
-              </p>
-              <div className="flex items-center gap-2 text-indigo-400 font-medium group-hover:gap-3 transition-all">
-                Start Borrowing
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                </svg>
-              </div>
-            </div>
-          </Link>
-
+        {/* Feature Card */}
+        <section className="grid grid-cols-1 gap-6 mb-16 max-w-xl mx-auto">
           <Link href="/stake" className="group block">
             <div className="glass-card glass-card-hover rounded-2xl p-8 h-full relative overflow-hidden">
               <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-emerald-500/20 to-transparent rounded-full blur-3xl group-hover:opacity-100 opacity-50 transition-opacity" />
@@ -459,12 +430,12 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                 </svg>
               </div>
-              <h3 className="text-xl font-bold text-white mb-3">Stake & Earn</h3>
+              <h3 className="text-xl font-bold text-white mb-3">Operator Dashboard</h3>
               <p className="text-gray-400 mb-6 leading-relaxed">
-                Become an oracle operator. Stake tokens to submit prices and earn rewards for maintaining accurate data feeds.
+                Registered operators submit prices on-chain. View live feeds, submit via wallet, and monitor circuit breaker status.
               </p>
               <div className="flex items-center gap-2 text-emerald-400 font-medium group-hover:gap-3 transition-all">
-                Start Staking
+                Open Dashboard
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                 </svg>
@@ -561,8 +532,6 @@ export default function Home() {
         </section>
       </main>
 
-      {/* AI Chatbot */}
-      <Chatbot prices={prices} />
     </div>
   );
 }

@@ -56,9 +56,7 @@ export function Footer() {
               <h4 className="font-semibold text-white text-sm uppercase tracking-wider">Protocol</h4>
               <ul className="space-y-3 text-sm">
                 <li><Link href="/" className="text-gray-400 hover:text-white transition-colors link-hover">Dashboard</Link></li>
-                <li><Link href="/borrow" className="text-gray-400 hover:text-white transition-colors link-hover">Borrow</Link></li>
-                <li><Link href="/positions" className="text-gray-400 hover:text-white transition-colors link-hover">Positions</Link></li>
-                <li><Link href="/stake" className="text-gray-400 hover:text-white transition-colors link-hover">Stake</Link></li>
+                <li><Link href="/stake" className="text-gray-400 hover:text-white transition-colors link-hover">Operators</Link></li>
               </ul>
             </div>
 

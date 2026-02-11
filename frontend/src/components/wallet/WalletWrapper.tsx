@@ -13,13 +13,9 @@ import {
 // Import styles
 import '@demox-labs/aleo-wallet-adapter-reactui/styles.css';
 
-// Program IDs that the wallet needs permission for (from env)
+// Only the oracle program — lending, registry, fee_distributor, multisig are removed
 const PROGRAM_IDS = [
   process.env.NEXT_PUBLIC_ORACLE_PROGRAM_ID || 'price_oracle_v2.aleo',
-  process.env.NEXT_PUBLIC_LENDING_PROGRAM_ID || 'lending_protocol_v2.aleo',
-  process.env.NEXT_PUBLIC_REGISTRY_PROGRAM_ID || 'oracle_registry_v1.aleo',
-  process.env.NEXT_PUBLIC_FEE_DISTRIBUTOR_PROGRAM_ID || 'fee_distributor_v1.aleo',
-  process.env.NEXT_PUBLIC_MULTISIG_PROGRAM_ID || 'multisig_admin_v1.aleo',
 ].filter(Boolean);
 
 interface WalletWrapperProps {

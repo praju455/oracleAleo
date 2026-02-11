@@ -13,9 +13,7 @@ export function Header({ health }: HeaderProps) {
 
   const navItems = [
     { href: '/', label: 'Dashboard' },
-    { href: '/borrow', label: 'Borrow' },
-    { href: '/positions', label: 'Positions' },
-    { href: '/stake', label: 'Stake', badge: 'APY' },
+    { href: '/stake', label: 'Operators' },
   ];
 
   return (
@@ -45,11 +43,6 @@ export function Header({ health }: HeaderProps) {
                   }`}
                 >
                   {item.label}
-                  {item.badge && (
-                    <span className="px-1.5 py-0.5 text-[10px] bg-gradient-to-r from-emerald-500 to-cyan-500 rounded text-white">
-                      {item.badge}
-                    </span>
-                  )}
                 </Link>
               );
             })}

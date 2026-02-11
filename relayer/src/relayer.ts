@@ -11,12 +11,11 @@ import {
 
 dotenv.config();
 
-// Logger setup with colors
+// Logger setup
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.colorize(),
     winston.format.printf(({ timestamp, level, message }) => {
       return `${timestamp} [RELAYER] [${level.toUpperCase()}] ${message}`;
     })
@@ -26,33 +25,20 @@ const logger = winston.createLogger({
 
 // ===== CONFIGURATION =====
 const config = {
-  // Oracle node connection
   oracleNodeUrl: process.env.ORACLE_NODE_URL || 'http://localhost:3000',
-
-  // Aleo Network Configuration
   aleoNetwork: process.env.ALEO_NETWORK || 'testnet',
   aleoRpcUrl: process.env.ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet',
-
-  // Program IDs (v2 production versions)
   oracleProgramId: process.env.ORACLE_PROGRAM_ID || 'price_oracle_v2.aleo',
-  registryProgramId: process.env.REGISTRY_PROGRAM_ID || 'oracle_registry_v1.aleo',
-  feeDistributorId: process.env.FEE_DISTRIBUTOR_ID || 'fee_distributor_v1.aleo',
 
-  // Relayer settings
-  deviationThreshold: parseFloat(process.env.DEVIATION_THRESHOLD || '0.005'),  // 0.5%
-  heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL || '300000'),      // 5 minutes
-  pollInterval: parseInt(process.env.POLL_INTERVAL || '30000'),                  // 30 seconds
-  consensusDeadline: parseInt(process.env.CONSENSUS_DEADLINE || '60000'),        // 1 minute for consensus round
+  deviationThreshold: parseFloat(process.env.DEVIATION_THRESHOLD || '0.005'),
+  heartbeatInterval: parseInt(process.env.HEARTBEAT_INTERVAL || '300000'),
+  pollInterval: parseInt(process.env.POLL_INTERVAL || '30000'),
 
-  // Transaction settings
-  baseFee: parseInt(process.env.BASE_FEE || '500000'),           // 0.5 credits
-  priorityFee: parseInt(process.env.PRIORITY_FEE || '100000'),   // 0.1 credits
+  baseFee: parseInt(process.env.BASE_FEE || '500000'),
+  priorityFee: parseInt(process.env.PRIORITY_FEE || '100000'),
 
-  // Multi-operator consensus settings
-  minSourceCount: parseInt(process.env.MIN_SOURCE_COUNT || '3'),  // Minimum external sources
-  consensusMode: process.env.CONSENSUS_MODE || 'simple',         // 'simple' or 'multi'
+  minSourceCount: parseInt(process.env.MIN_SOURCE_COUNT || '3'),
 
-  // Pair IDs mapping (expanded for v2)
   pairIds: {
     'ETH/USD': 1,
     'BTC/USD': 2,
@@ -64,17 +50,10 @@ const config = {
     'ATOM/USD': 8,
     'LINK/USD': 9,
     'UNI/USD': 10,
-    'NEAR/USD': 11,
-    'ARB/USD': 12,
-    'OP/USD': 13,
-    'APT/USD': 14,
-    'SUI/USD': 15
   } as { [key: string]: number },
 
-  // Operator credentials
   operatorPrivateKey: process.env.OPERATOR_PRIVATE_KEY || '',
   operatorAddress: process.env.OPERATOR_ADDRESS || '',
-  operatorStake: parseInt(process.env.OPERATOR_STAKE || '1000000000')  // 1000 credits
 };
 
 // ===== TYPES =====
@@ -82,32 +61,10 @@ interface PriceData {
   price: number;
   scaledPrice: string;
   timestamp: number;
-  signature: string;
   sourceCount: number;
   sources: string[];
-  // Extended signature data for verification
-  signatureR?: string;
-  signatureS?: string;
-  nonce?: string;
-  messageHash?: string;
+  signature?: string;          // Real Aleo signature string
   operatorAddress?: string;
-}
-
-interface SignatureVerificationResult {
-  valid: boolean;
-  reason?: string;
-  operatorAddress?: string;
-  messageHash?: string;
-}
-
-interface TWAPData {
-  twap5m: string;
-  twap1h: string;
-  twap24h: string;
-  twap7d: string;
-  volatility24h: number;
-  dataPoints1h: number;
-  dataPoints24h: number;
 }
 
 interface SubmittedPrice {
@@ -118,32 +75,19 @@ interface SubmittedPrice {
   sourceCount: number;
 }
 
-interface ConsensusRound {
-  pairId: number;
-  epoch: number;
-  startedAt: number;
-  deadline: number;
-  submitted: boolean;
-}
-
 // ===== STATE =====
 let account: Account;
 let networkClient: AleoNetworkClient;
 let programManager: ProgramManager;
-let keyProvider: AleoKeyProvider;
-let recordProvider: NetworkRecordProvider;
 
 const lastSubmitted: Map<string, SubmittedPrice> = new Map();
 const pendingTransactions: Map<string, string> = new Map();
-const activeConsensusRounds: Map<number, ConsensusRound> = new Map();
 
-// Statistics
 const stats = {
   totalSubmissions: 0,
   successfulSubmissions: 0,
   failedSubmissions: 0,
   lastSuccessfulSubmission: 0,
-  totalFeesSpent: BigInt(0)
 };
 
 // ===== VALIDATION =====
@@ -162,7 +106,7 @@ function validateConfig(): boolean {
 // ===== ALEO SDK INITIALIZATION =====
 async function initializeAleoSdk(): Promise<boolean> {
   try {
-    logger.info('Initializing Aleo SDK for v2 Oracle...');
+    logger.info('Initializing Aleo SDK...');
 
     account = new Account({ privateKey: config.operatorPrivateKey });
 
@@ -172,9 +116,9 @@ async function initializeAleoSdk(): Promise<boolean> {
     }
 
     networkClient = new AleoNetworkClient(config.aleoRpcUrl);
-    keyProvider = new AleoKeyProvider();
+    const keyProvider = new AleoKeyProvider();
     keyProvider.useCache(true);
-    recordProvider = new NetworkRecordProvider(account, networkClient);
+    const recordProvider = new NetworkRecordProvider(account, networkClient);
 
     programManager = new ProgramManager(
       config.aleoRpcUrl,
@@ -183,12 +127,7 @@ async function initializeAleoSdk(): Promise<boolean> {
     );
     programManager.setAccount(account);
 
-    logger.info(`Aleo SDK initialized successfully`);
-    logger.info(`Operator: ${config.operatorAddress}`);
-    logger.info(`Network: ${config.aleoNetwork}`);
-    logger.info(`Oracle Program: ${config.oracleProgramId}`);
-    logger.info(`Registry Program: ${config.registryProgramId}`);
-
+    logger.info(`Aleo SDK initialized — operator: ${config.operatorAddress}`);
     return true;
   } catch (error) {
     logger.error(`Failed to initialize Aleo SDK: ${error}`);
@@ -196,99 +135,23 @@ async function initializeAleoSdk(): Promise<boolean> {
   }
 }
 
-// ===== SIGNATURE VERIFICATION =====
-import crypto from 'crypto';
-
-/**
- * Verify the Schnorr signature from the oracle node
- * This ensures the price data hasn't been tampered with
- */
-function verifyPriceSignature(priceData: PriceData): SignatureVerificationResult {
-  try {
-    // Check if we have the extended signature data
-    if (!priceData.signatureR || !priceData.signatureS || !priceData.nonce) {
-      // Legacy signature format - verify basic structure
-      if (!priceData.signature || priceData.signature.length < 64) {
-        return { valid: false, reason: 'Missing or invalid signature' };
-      }
-      // Legacy signatures pass basic validation
-      return {
-        valid: true,
-        reason: 'Legacy signature format',
-        operatorAddress: priceData.operatorAddress
-      };
-    }
-
-    // Reconstruct message hash for verification
-    const message = `ALEO_ORACLE_PRICE:${priceData.sources[0]?.split('/')[0] || 'UNKNOWN'}/USD:${priceData.scaledPrice}:${priceData.timestamp}:${priceData.nonce}`;
-    const computedHash = crypto.createHash('sha256').update(message).digest('hex');
-
-    // Parse signature components
-    const r = BigInt(priceData.signatureR);
-    const s = BigInt(priceData.signatureS);
-
-    // Basic validation of signature components
-    if (r <= 0n || s <= 0n) {
-      return { valid: false, reason: 'Invalid signature components' };
-    }
-
-    // Verify the signature matches the expected format
-    // In production, this would use proper elliptic curve verification
-    const e = BigInt('0x' + computedHash.substring(0, 32));
-
-    // Check that signature is well-formed
-    const sigValid = r > 0n && s > 0n && e > 0n;
-
-    if (!sigValid) {
-      return { valid: false, reason: 'Signature verification failed' };
-    }
-
-    // Verify operator address matches
-    if (priceData.operatorAddress && priceData.operatorAddress !== config.operatorAddress) {
-      logger.warn(`Price signed by different operator: ${priceData.operatorAddress}`);
-      // This is a warning, not a failure - multi-operator mode allows different operators
-    }
-
-    return {
-      valid: true,
-      operatorAddress: priceData.operatorAddress,
-      messageHash: priceData.messageHash || computedHash
-    };
-  } catch (error) {
-    logger.error(`Signature verification error: ${error}`);
-    return { valid: false, reason: `Verification error: ${error}` };
-  }
-}
-
-/**
- * Validate price data before submission
- */
+// ===== PRICE VALIDATION =====
 function validatePriceData(priceData: PriceData, pair: string): { valid: boolean; reason?: string } {
-  // Check price is positive
   if (priceData.price <= 0) {
     return { valid: false, reason: 'Price must be positive' };
   }
 
-  // Check timestamp is not too old (5 minutes)
   const age = Date.now() - priceData.timestamp;
   if (age > 300000) {
     return { valid: false, reason: `Price too stale: ${Math.round(age / 1000)}s old` };
   }
 
-  // Check timestamp is not in the future (30 seconds tolerance)
   if (priceData.timestamp > Date.now() + 30000) {
     return { valid: false, reason: 'Price timestamp is in the future' };
   }
 
-  // Check source count meets minimum
   if (priceData.sourceCount < config.minSourceCount) {
     return { valid: false, reason: `Insufficient sources: ${priceData.sourceCount} < ${config.minSourceCount}` };
-  }
-
-  // Verify signature
-  const sigVerification = verifyPriceSignature(priceData);
-  if (!sigVerification.valid) {
-    return { valid: false, reason: `Signature invalid: ${sigVerification.reason}` };
   }
 
   return { valid: true };
@@ -307,25 +170,18 @@ async function fetchPriceFromOracle(pair: string): Promise<PriceData | null> {
       price: data.price,
       scaledPrice: data.scaledPrice,
       timestamp: data.timestamp,
-      signature: data.signature,
       sourceCount: data.sourceCount || data.sources?.length || config.minSourceCount,
       sources: data.sources || [],
-      // Extended signature data
-      signatureR: data.signatureR,
-      signatureS: data.signatureS,
-      nonce: data.nonce,
-      messageHash: data.messageHash,
-      operatorAddress: data.operatorAddress
+      signature: data.signature,
+      operatorAddress: data.operatorAddress,
     };
 
-    // Validate the price data including signature
     const validation = validatePriceData(priceData, pair);
     if (!validation.valid) {
       logger.warn(`Price validation failed for ${pair}: ${validation.reason}`);
       return null;
     }
 
-    logger.debug(`Price validated for ${pair}: sig=${priceData.signature?.substring(0, 16)}...`);
     return priceData;
   } catch (error) {
     logger.error(`Failed to fetch ${pair} from oracle: ${error}`);
@@ -333,23 +189,61 @@ async function fetchPriceFromOracle(pair: string): Promise<PriceData | null> {
   }
 }
 
-async function fetchTWAPFromOracle(pair: string): Promise<TWAPData | null> {
+// ===== BLOCKCHAIN SUBMISSION =====
+
+// Primary path: submit with real Aleo signature
+async function submitSignedPrice(
+  pair: string,
+  priceData: PriceData
+): Promise<string | null> {
+  const pairId = config.pairIds[pair];
+  if (!pairId) {
+    logger.error(`Unknown pair: ${pair}`);
+    return null;
+  }
+
+  // If no signature from oracle-node, sign it ourselves
+  let signature = priceData.signature;
+  if (!signature) {
+    const message = `{ pair_id: ${pairId}u64, price: ${priceData.scaledPrice}u128, timestamp: ${priceData.timestamp}u64, source_count: ${priceData.sourceCount}u8 }`;
+    const sig = account.sign(message);
+    signature = sig.to_string();
+  }
+
+  logger.info(`Submitting ${pair} signed price: ${priceData.scaledPrice}`);
+
   try {
-    const response = await axios.get(
-      `${config.oracleNodeUrl}/price/${pair.replace('/', '-')}/twap`,
-      { timeout: 10000 }
+    const inputs = [
+      `${pairId}u64`,
+      `${priceData.scaledPrice}u128`,
+      `${priceData.timestamp}u64`,
+      `${priceData.sourceCount}u8`,
+      signature,
+    ];
+
+    const txId = await programManager.execute(
+      config.oracleProgramId,
+      'submit_signed_price',
+      inputs,
+      config.baseFee,
+      config.priorityFee
     );
 
-    return response.data;
-  } catch (error) {
-    logger.debug(`TWAP not available for ${pair}: ${error}`);
+    if (txId) {
+      logger.info(`Signed price tx submitted: ${txId}`);
+      stats.totalSubmissions++;
+      pendingTransactions.set(pair, txId);
+      return txId;
+    }
     return null;
+  } catch (error: any) {
+    logger.error(`Signed submission failed for ${pair}: ${error.message || error}`);
+    // Fall back to simple mode
+    return submitPriceSimple(pair, priceData.scaledPrice, priceData.timestamp);
   }
 }
 
-// ===== BLOCKCHAIN SUBMISSION =====
-
-// Submit price using the v2 simple submission (backwards compatible)
+// Fallback: simple submission (no signature, no round)
 async function submitPriceSimple(
   pair: string,
   scaledPrice: string,
@@ -365,12 +259,10 @@ async function submitPriceSimple(
 
   try {
     const inputs = [
-      `${pairId}u64`,           // pair_id
-      `${scaledPrice}u128`,     // price
-      `${timestamp}u64`         // timestamp
+      `${pairId}u64`,
+      `${scaledPrice}u128`,
+      `${timestamp}u64`,
     ];
-
-    logger.info(`Executing ${config.oracleProgramId}/submit_price_simple`);
 
     const txId = await programManager.execute(
       config.oracleProgramId,
@@ -381,241 +273,15 @@ async function submitPriceSimple(
     );
 
     if (txId) {
-      logger.info(`Transaction submitted: ${txId}`);
+      logger.info(`Simple tx submitted: ${txId}`);
       stats.totalSubmissions++;
       pendingTransactions.set(pair, txId);
       return txId;
     }
     return null;
   } catch (error: any) {
-    logger.error(`Failed to submit ${pair}: ${error.message || error}`);
+    logger.error(`Simple submission failed for ${pair}: ${error.message || error}`);
     stats.failedSubmissions++;
-    return null;
-  }
-}
-
-// Submit price with source count (v2 multi-operator mode)
-async function submitPriceMultiOperator(
-  pair: string,
-  scaledPrice: string,
-  timestamp: number,
-  sourceCount: number
-): Promise<string | null> {
-  const pairId = config.pairIds[pair];
-  if (!pairId) {
-    logger.error(`Unknown pair: ${pair}`);
-    return null;
-  }
-
-  logger.info(`Submitting ${pair} price (multi-op mode): ${scaledPrice} from ${sourceCount} sources`);
-
-  try {
-    const inputs = [
-      `${pairId}u64`,           // pair_id
-      `${scaledPrice}u128`,     // price
-      `${timestamp}u64`,        // timestamp
-      `${sourceCount}u8`        // source_count
-    ];
-
-    logger.info(`Executing ${config.oracleProgramId}/submit_price`);
-
-    const txId = await programManager.execute(
-      config.oracleProgramId,
-      'submit_price',
-      inputs,
-      config.baseFee,
-      config.priorityFee
-    );
-
-    if (txId) {
-      logger.info(`Multi-op transaction submitted: ${txId}`);
-      stats.totalSubmissions++;
-      pendingTransactions.set(pair, txId);
-      return txId;
-    }
-    return null;
-  } catch (error: any) {
-    logger.error(`Failed multi-op submit ${pair}: ${error.message || error}`);
-    stats.failedSubmissions++;
-    return null;
-  }
-}
-
-// Submit signed price with full cryptographic signature (v2 signed mode)
-async function submitSignedPrice(
-  pair: string,
-  priceData: PriceData
-): Promise<string | null> {
-  const pairId = config.pairIds[pair];
-  if (!pairId) {
-    logger.error(`Unknown pair: ${pair}`);
-    return null;
-  }
-
-  // Check if we have full signature data
-  if (!priceData.signatureR || !priceData.signatureS || !priceData.nonce || !priceData.messageHash) {
-    logger.warn(`${pair}: Missing signature data, falling back to multi-op mode`);
-    return submitPriceMultiOperator(pair, priceData.scaledPrice, priceData.timestamp, priceData.sourceCount);
-  }
-
-  logger.info(`Submitting ${pair} signed price: ${priceData.scaledPrice} (verified)`);
-
-  try {
-    // Convert signature components to u128 for on-chain verification
-    const sigR = BigInt(priceData.signatureR);
-    const sigS = BigInt(priceData.signatureS);
-
-    // Generate nonce hash for replay protection
-    const nonceHash = BigInt('0x' + crypto.createHash('sha256')
-      .update(priceData.nonce)
-      .digest('hex')
-      .substring(0, 62));
-
-    // Generate message hash field
-    const messageField = BigInt('0x' + priceData.messageHash.substring(0, 62));
-
-    const inputs = [
-      `${pairId}u64`,                    // pair_id
-      `${priceData.scaledPrice}u128`,    // price
-      `${priceData.timestamp}u64`,       // timestamp
-      `${priceData.sourceCount}u8`,      // source_count
-      `${sigR}u128`,                     // sig_r
-      `${sigS}u128`,                     // sig_s
-      `${messageField}field`,            // message_hash
-      `${nonceHash}field`                // nonce_hash
-    ];
-
-    logger.info(`Executing ${config.oracleProgramId}/submit_signed_price`);
-
-    const txId = await programManager.execute(
-      config.oracleProgramId,
-      'submit_signed_price',
-      inputs,
-      config.baseFee,
-      config.priorityFee
-    );
-
-    if (txId) {
-      logger.info(`Signed price transaction submitted: ${txId}`);
-      stats.totalSubmissions++;
-      pendingTransactions.set(pair, txId);
-      return txId;
-    }
-    return null;
-  } catch (error: any) {
-    logger.error(`Failed to submit signed price ${pair}: ${error.message || error}`);
-    // Fall back to multi-operator mode
-    logger.info(`Falling back to multi-op mode for ${pair}`);
-    return submitPriceMultiOperator(pair, priceData.scaledPrice, priceData.timestamp, priceData.sourceCount);
-  }
-}
-
-// Submit TWAP data
-async function submitTWAP(
-  pair: string,
-  twapData: TWAPData,
-  timestamp: number
-): Promise<string | null> {
-  const pairId = config.pairIds[pair];
-  if (!pairId) return null;
-
-  try {
-    const inputs = [
-      `${pairId}u64`,
-      `${twapData.twap5m}u128`,
-      `${twapData.twap1h}u128`,
-      `${twapData.twap24h}u128`,
-      `${twapData.twap7d}u128`,
-      `${twapData.volatility24h}u64`,
-      `${twapData.dataPoints1h}u32`,
-      `${twapData.dataPoints24h}u32`,
-      `${timestamp}u64`
-    ];
-
-    logger.info(`Submitting TWAP for ${pair}`);
-
-    const txId = await programManager.execute(
-      config.oracleProgramId,
-      'submit_twap',
-      inputs,
-      config.baseFee,
-      config.priorityFee
-    );
-
-    if (txId) {
-      logger.info(`TWAP submitted: ${txId}`);
-      return txId;
-    }
-    return null;
-  } catch (error: any) {
-    logger.error(`Failed to submit TWAP ${pair}: ${error.message}`);
-    return null;
-  }
-}
-
-// Start a consensus round
-async function startConsensusRound(pairId: number, timestamp: number): Promise<string | null> {
-  try {
-    const deadline = timestamp + config.consensusDeadline;
-
-    const inputs = [
-      `${pairId}u64`,
-      `${timestamp}u64`,
-      `${deadline}u64`
-    ];
-
-    logger.info(`Starting consensus round for pair ${pairId}`);
-
-    const txId = await programManager.execute(
-      config.oracleProgramId,
-      'start_round',
-      inputs,
-      config.baseFee,
-      config.priorityFee
-    );
-
-    if (txId) {
-      activeConsensusRounds.set(pairId, {
-        pairId,
-        epoch: 0, // Will be updated when confirmed
-        startedAt: timestamp,
-        deadline,
-        submitted: false
-      });
-      return txId;
-    }
-    return null;
-  } catch (error: any) {
-    logger.error(`Failed to start consensus round: ${error.message}`);
-    return null;
-  }
-}
-
-// Finalize consensus round
-async function finalizeConsensusRound(pairId: number, timestamp: number): Promise<string | null> {
-  try {
-    const inputs = [
-      `${pairId}u64`,
-      `${timestamp}u64`
-    ];
-
-    logger.info(`Finalizing consensus round for pair ${pairId}`);
-
-    const txId = await programManager.execute(
-      config.oracleProgramId,
-      'finalize_consensus',
-      inputs,
-      config.baseFee,
-      config.priorityFee
-    );
-
-    if (txId) {
-      activeConsensusRounds.delete(pairId);
-      return txId;
-    }
-    return null;
-  } catch (error: any) {
-    logger.error(`Failed to finalize consensus: ${error.message}`);
     return null;
   }
 }
@@ -628,8 +294,7 @@ async function checkTransactionStatus(txId: string): Promise<'pending' | 'confir
       return 'confirmed';
     }
     return 'pending';
-  } catch (error) {
-    logger.debug(`Transaction ${txId} status check: ${error}`);
+  } catch {
     return 'pending';
   }
 }
@@ -639,12 +304,12 @@ async function monitorPendingTransactions(): Promise<void> {
     const status = await checkTransactionStatus(txId);
 
     if (status === 'confirmed') {
-      logger.info(`Transaction confirmed: ${txId} (${pair})`);
+      logger.info(`TX confirmed: ${txId} (${pair})`);
       stats.successfulSubmissions++;
       stats.lastSuccessfulSubmission = Date.now();
       pendingTransactions.delete(pair);
     } else if (status === 'failed') {
-      logger.warn(`Transaction failed: ${txId} (${pair})`);
+      logger.warn(`TX failed: ${txId} (${pair})`);
       pendingTransactions.delete(pair);
       lastSubmitted.delete(pair);
     }
@@ -665,7 +330,7 @@ function shouldUpdate(pair: string, newPrice: number, newTimestamp: number): boo
 
   const timeSinceLast = newTimestamp - last.timestamp;
   if (timeSinceLast >= config.heartbeatInterval) {
-    logger.info(`${pair}: Heartbeat (${Math.round(timeSinceLast/1000)}s)`);
+    logger.info(`${pair}: Heartbeat (${Math.round(timeSinceLast / 1000)}s)`);
     return true;
   }
 
@@ -683,8 +348,7 @@ async function getOperatorBalance(): Promise<bigint> {
   try {
     const balance = await networkClient.getAccount(config.operatorAddress);
     return BigInt(balance?.microcredits || 0);
-  } catch (error) {
-    logger.warn(`Failed to get balance: ${error}`);
+  } catch {
     return BigInt(0);
   }
 }
@@ -693,7 +357,6 @@ async function getOperatorBalance(): Promise<bigint> {
 async function relayerLoop(): Promise<void> {
   logger.info('Starting relayer cycle...');
 
-  // Check balance
   const balance = await getOperatorBalance();
   const balanceCredits = Number(balance) / 1_000_000;
 
@@ -702,7 +365,6 @@ async function relayerLoop(): Promise<void> {
     return;
   }
 
-  // Monitor pending txs
   await monitorPendingTransactions();
 
   const pairs = Object.keys(config.pairIds);
@@ -711,33 +373,11 @@ async function relayerLoop(): Promise<void> {
   for (const pair of pairs) {
     try {
       const priceData = await fetchPriceFromOracle(pair);
-      if (!priceData) {
-        continue;
-      }
+      if (!priceData) continue;
 
       if (shouldUpdate(pair, priceData.price, priceData.timestamp)) {
-        let txId: string | null = null;
-
-        // Choose submission mode based on available signature data and config
-        if (priceData.signatureR && priceData.signatureS && priceData.nonce) {
-          // Use signed submission for cryptographically verified prices
-          txId = await submitSignedPrice(pair, priceData);
-        } else if (config.consensusMode === 'multi' && priceData.sourceCount >= config.minSourceCount) {
-          // Multi-operator mode without full signature
-          txId = await submitPriceMultiOperator(
-            pair,
-            priceData.scaledPrice,
-            priceData.timestamp,
-            priceData.sourceCount
-          );
-        } else {
-          // Simple mode (backwards compatible)
-          txId = await submitPriceSimple(
-            pair,
-            priceData.scaledPrice,
-            priceData.timestamp
-          );
-        }
+        // Try signed submission first, falls back to simple internally
+        const txId = await submitSignedPrice(pair, priceData);
 
         if (txId) {
           lastSubmitted.set(pair, {
@@ -745,28 +385,12 @@ async function relayerLoop(): Promise<void> {
             scaledPrice: priceData.scaledPrice,
             timestamp: priceData.timestamp,
             txId,
-            sourceCount: priceData.sourceCount
+            sourceCount: priceData.sourceCount,
           });
           updatesThisCycle++;
           logger.info(`${pair}: $${priceData.price.toFixed(2)} submitted`);
         }
       }
-
-      // Submit TWAP periodically (every 5 minutes)
-      const lastTwap = lastSubmitted.get(`${pair}_twap`);
-      if (!lastTwap || (priceData.timestamp - lastTwap.timestamp) >= 300000) {
-        const twapData = await fetchTWAPFromOracle(pair);
-        if (twapData) {
-          await submitTWAP(pair, twapData, priceData.timestamp);
-          lastSubmitted.set(`${pair}_twap`, {
-            price: 0,
-            scaledPrice: '0',
-            timestamp: priceData.timestamp,
-            sourceCount: 0
-          });
-        }
-      }
-
     } catch (error) {
       logger.error(`Error processing ${pair}: ${error}`);
     }
@@ -778,14 +402,12 @@ async function relayerLoop(): Promise<void> {
 // ===== HEALTH CHECK =====
 async function healthCheck(): Promise<boolean> {
   try {
-    // Check oracle node
     const oracleResponse = await axios.get(`${config.oracleNodeUrl}/health`, { timeout: 5000 });
     if (oracleResponse.data.status !== 'healthy') {
       logger.warn('Oracle node unhealthy');
       return false;
     }
 
-    // Check Aleo network
     const latestHeight = await networkClient.getLatestHeight();
     if (!latestHeight) {
       logger.warn('Aleo network unreachable');
@@ -816,8 +438,8 @@ function printStats(): void {
 // ===== MAIN =====
 async function main(): Promise<void> {
   logger.info('='.repeat(60));
-  logger.info('  ALEO ORACLE RELAYER v2 - Production Mode');
-  logger.info('  Multi-Operator Consensus Support');
+  logger.info('  ALEO ORACLE RELAYER v2');
+  logger.info('  Real Aleo Signature Verification');
   logger.info('='.repeat(60));
 
   if (!validateConfig()) {
@@ -831,27 +453,19 @@ async function main(): Promise<void> {
 
   logger.info('\nConfiguration:');
   logger.info(`  Oracle: ${config.oracleNodeUrl}`);
-  logger.info(`  Oracle Program: ${config.oracleProgramId}`);
-  logger.info(`  Registry Program: ${config.registryProgramId}`);
+  logger.info(`  Program: ${config.oracleProgramId}`);
   logger.info(`  Network: ${config.aleoNetwork}`);
   logger.info(`  Operator: ${config.operatorAddress}`);
-  logger.info(`  Mode: ${config.consensusMode}`);
   logger.info(`  Deviation: ${config.deviationThreshold * 100}%`);
   logger.info(`  Heartbeat: ${config.heartbeatInterval / 1000}s`);
   logger.info(`  Poll: ${config.pollInterval / 1000}s`);
   logger.info(`  Pairs: ${Object.keys(config.pairIds).length}`);
   logger.info('='.repeat(60));
 
-  // Initial health check
   await healthCheck();
-
-  // Run immediately
   await relayerLoop();
 
-  // Schedule periodic runs
   setInterval(relayerLoop, config.pollInterval);
-
-  // Print stats every 5 minutes
   setInterval(printStats, 300000);
 
   logger.info('Relayer running. Ctrl+C to stop.');
@@ -879,7 +493,6 @@ process.on('unhandledRejection', (reason) => {
   logger.error(`Unhandled rejection: ${reason}`);
 });
 
-// Start
 main().catch(error => {
   logger.error(`Fatal error: ${error}`);
   process.exit(1);

@@ -1,5 +1,5 @@
 // Aleo Privacy-Preserving Price Oracle v2
-// Production-Ready with Multi-Operator Consensus, On-Chain Signature Verification, and Advanced Security
+// Production-Ready with Real Signature Verification (signature::verify)
 
 program price_oracle_v2.aleo {
     // ===== CONSTANTS =====
@@ -22,26 +22,13 @@ program price_oracle_v2.aleo {
     // Maximum allowed clock drift (30 seconds)
     const MAX_CLOCK_DRIFT: u64 = 30000u64;
 
-    // Signature verification modulus (max u128 - 1 for modulo operations)
-    const SIG_MODULUS: u128 = 340282366920938463463374607431768211455u128;  // 2^128 - 1
-
     // ===== STRUCTS =====
 
-    // Cryptographic signature for price verification
-    struct PriceSignature {
-        sig_r: u128,                   // R component of Schnorr signature
-        sig_s: u128,                   // S component of Schnorr signature
-        message_hash: field,           // Hash of the signed message
-        nonce_hash: field              // Hash of nonce for replay protection
-    }
-
-    // Signed price submission with cryptographic proof
-    struct SignedPriceSubmission {
-        operator: address,
+    // Message struct for hashing — must match off-chain signing
+    struct PriceMessage {
+        pair_id: u64,
         price: u128,
         timestamp: u64,
-        pair_id: u64,
-        price_sig: PriceSignature,
         source_count: u8
     }
 
@@ -51,8 +38,7 @@ program price_oracle_v2.aleo {
         price: u128,
         timestamp: u64,
         block_height: u32,
-        source_count: u8,              // Number of external sources operator used
-        sig_verified: bool             // Whether signature was verified
+        source_count: u8
     }
 
     // Aggregated consensus price
@@ -69,30 +55,30 @@ program price_oracle_v2.aleo {
         all_sigs_verified: bool        // True if all signatures were verified
     }
 
-    // TWAP (Time-Weighted Average Price) data with more granularity
+    // TWAP (Time-Weighted Average Price) data
     struct TWAPData {
-        twap_5m: u128,                 // 5-minute TWAP
-        twap_1h: u128,                 // 1-hour TWAP
-        twap_24h: u128,                // 24-hour TWAP
-        twap_7d: u128,                 // 7-day TWAP
-        volatility_24h: u64,           // 24h volatility in basis points
+        twap_5m: u128,
+        twap_1h: u128,
+        twap_24h: u128,
+        twap_7d: u128,
+        volatility_24h: u64,
         last_update: u64,
         data_points_1h: u32,
         data_points_24h: u32
     }
 
-    // Circuit breaker configuration (more granular)
+    // Circuit breaker configuration
     struct CircuitBreakerConfig {
         max_price_change_1m: u64,      // Max change in 1 minute (basis points)
         max_price_change_1h: u64,      // Max change in 1 hour (basis points)
         max_price_change_24h: u64,     // Max change in 24 hours (basis points)
-        halt_duration_soft: u64,       // Soft halt duration (ms) - limited operations
-        halt_duration_hard: u64,       // Hard halt duration (ms) - no operations
-        min_operators: u8,             // Minimum operators to not trigger halt
+        halt_duration_soft: u64,       // Soft halt duration (ms)
+        halt_duration_hard: u64,       // Hard halt duration (ms)
+        min_operators: u8,
         enabled: bool
     }
 
-    // Circuit breaker state with detailed tracking
+    // Circuit breaker state
     struct CircuitBreakerState {
         is_soft_halted: bool,
         is_hard_halted: bool,
@@ -104,25 +90,25 @@ program price_oracle_v2.aleo {
         price_24h_ago: u128,
         trip_count_soft: u32,
         trip_count_hard: u32,
-        last_trip_reason: u8           // 1=1m spike, 2=1h spike, 3=24h spike, 4=low operators
+        last_trip_reason: u8
     }
 
-    // Historical price entry for on-chain history
+    // Historical price entry
     struct HistoricalPrice {
         price: u128,
         timestamp: u64,
         epoch: u32,
-        verified: bool                 // Whether this price had verified signatures
+        verified: bool
     }
 
     // Pair metadata
     struct PairInfo {
         pair_id: u64,
-        base_asset: field,             // Hash of base asset symbol (e.g., "ETH")
-        quote_asset: field,            // Hash of quote asset symbol (e.g., "USD")
+        base_asset: field,
+        quote_asset: field,
         decimals: u8,
         is_active: bool,
-        min_update_interval: u64,      // Minimum time between updates (ms)
+        min_update_interval: u64,
         created_at: u64
     }
 
@@ -131,7 +117,7 @@ program price_oracle_v2.aleo {
         pair_id: u64,
         epoch: u32,
         started_at: u64,
-        deadline: u64,                 // Submission deadline
+        deadline: u64,
         submissions_count: u8,
         finalized: bool,
         finalized_at: u64
@@ -146,14 +132,6 @@ program price_oracle_v2.aleo {
         sig_verified: bool
     }
 
-    // Operator public key registration
-    struct OperatorKeyInfo {
-        operator: address,
-        public_key_hash: field,        // Hash of operator's public signing key
-        registered_at: u64,
-        is_active: bool
-    }
-
     // ===== MAPPINGS =====
 
     // Admin address
@@ -162,14 +140,11 @@ program price_oracle_v2.aleo {
     // Protocol pause state
     mapping paused: u8 => bool;
 
-    // Registered operators (validated against registry)
+    // Registered operators
     mapping registered_operators: address => bool;
 
-    // Operator stakes (cached from registry for weight calculation)
+    // Operator stakes
     mapping operator_stakes: address => u64;
-
-    // Operator public key hashes for signature verification
-    mapping operator_keys: address => field;
 
     // Pair registry
     mapping pairs: u64 => PairInfo;
@@ -213,14 +188,11 @@ program price_oracle_v2.aleo {
     // Global epoch counter
     mapping global_epoch: u8 => u32;
 
-    // Price update count per pair (for statistics)
+    // Price update count per pair
     mapping update_count: u64 => u64;
 
-    // Last update timestamp per pair (for staleness check)
+    // Last update timestamp per pair
     mapping last_update: u64 => u64;
-
-    // Used nonces for replay protection: nonce_hash => bool
-    mapping used_nonces: field => bool;
 
     // Verified signatures count per epoch
     mapping verified_sig_count: u32 => u8;
@@ -246,13 +218,12 @@ program price_oracle_v2.aleo {
         Mapping::set(total_pairs, 0u8, 0u64);
         Mapping::set(global_epoch, 0u8, 1u32);
 
-        // Initialize circuit breaker with production settings
         let cb_config: CircuitBreakerConfig = CircuitBreakerConfig {
-            max_price_change_1m: 500u64,     // 5% per minute
-            max_price_change_1h: 1500u64,    // 15% per hour
-            max_price_change_24h: 3000u64,   // 30% per 24h
-            halt_duration_soft: 300000u64,   // 5 minutes soft halt
-            halt_duration_hard: 900000u64,   // 15 minutes hard halt
+            max_price_change_1m: 500u64,
+            max_price_change_1h: 1500u64,
+            max_price_change_24h: 3000u64,
+            halt_duration_soft: 300000u64,
+            halt_duration_hard: 900000u64,
             min_operators: 3u8,
             enabled: true
         };
@@ -261,7 +232,6 @@ program price_oracle_v2.aleo {
 
     // ===== PAIR MANAGEMENT =====
 
-    // Add a new trading pair
     async transition add_pair(
         public pair_id: u64,
         public base_asset_hash: field,
@@ -300,7 +270,6 @@ program price_oracle_v2.aleo {
         let total: u64 = Mapping::get_or_use(total_pairs, 0u8, 0u64);
         Mapping::set(total_pairs, 0u8, total + 1u64);
 
-        // Initialize empty TWAP
         let empty_twap: TWAPData = TWAPData {
             twap_5m: 0u128,
             twap_1h: 0u128,
@@ -313,7 +282,6 @@ program price_oracle_v2.aleo {
         };
         Mapping::set(twap_data, pair_id, empty_twap);
 
-        // Initialize circuit breaker state
         let cb_state: CircuitBreakerState = CircuitBreakerState {
             is_soft_halted: false,
             is_hard_halted: false,
@@ -335,30 +303,27 @@ program price_oracle_v2.aleo {
 
     // ===== OPERATOR REGISTRATION =====
 
-    // Register operator with public key for signature verification
+    // Register operator — address IS their identity (no separate key hash needed)
     async transition register_operator(
         public operator: address,
-        public initial_stake: u64,
-        public public_key_hash: field
+        public initial_stake: u64
     ) -> Future {
-        return finalize_register_operator(self.caller, operator, initial_stake, public_key_hash);
+        return finalize_register_operator(self.caller, operator, initial_stake);
     }
 
     async function finalize_register_operator(
         caller: address,
         operator: address,
-        initial_stake: u64,
-        public_key_hash: field
+        initial_stake: u64
     ) {
         let admin_addr: address = Mapping::get(admin, 0u8);
         assert_eq(caller, admin_addr);
 
         Mapping::set(registered_operators, operator, true);
         Mapping::set(operator_stakes, operator, initial_stake);
-        Mapping::set(operator_keys, operator, public_key_hash);
     }
 
-    // Update operator stake (admin only - called when stake changes in registry)
+    // Update operator stake
     async transition update_operator_stake(
         public operator: address,
         public new_stake: u64
@@ -376,29 +341,9 @@ program price_oracle_v2.aleo {
 
         Mapping::set(operator_stakes, operator, new_stake);
 
-        // Deactivate if stake too low
         if new_stake < 1000000000u64 {
             Mapping::set(registered_operators, operator, false);
         }
-    }
-
-    // Update operator public key
-    async transition update_operator_key(
-        public operator: address,
-        public new_public_key_hash: field
-    ) -> Future {
-        return finalize_update_key(self.caller, operator, new_public_key_hash);
-    }
-
-    async function finalize_update_key(
-        caller: address,
-        operator: address,
-        new_public_key_hash: field
-    ) {
-        let admin_addr: address = Mapping::get(admin, 0u8);
-        assert_eq(caller, admin_addr);
-
-        Mapping::set(operator_keys, operator, new_public_key_hash);
     }
 
     // Remove operator
@@ -414,59 +359,34 @@ program price_oracle_v2.aleo {
         Mapping::set(operator_stakes, operator, 0u64);
     }
 
-    // ===== SIGNATURE VERIFICATION HELPERS =====
+    // ===== PRICE SUBMISSION WITH REAL ALEO SIGNATURE =====
 
-    // Verify Schnorr signature on-chain (simplified)
-    // In production, this would use proper BLS12-377 curve operations
-    inline verify_signature(
-        message_hash: field,
-        sig_r: u128,
-        sig_s: u128,
-        public_key_hash: field
-    ) -> bool {
-        // Simplified signature verification
-        // Real implementation would use Aleo's native signature verification
-        // For now, we verify that the signature components are non-zero and valid
-        let r_valid: bool = sig_r > 0u128;
-        let s_valid: bool = sig_s > 0u128;
-
-        // Check that R + e*P = s*G (simplified check)
-        // This is a placeholder - actual verification uses elliptic curve math
-        let message_scalar: u128 = BHP256::hash_to_u128(message_hash);
-        let expected_check: u128 = (sig_r + message_scalar) % 340282366920938463463374607431768211455u128;
-
-        return r_valid && s_valid && expected_check > 0u128;
-    }
-
-    // ===== PRICE SUBMISSION WITH SIGNATURE =====
-
-    // Submit signed price (with signature verification)
+    // Submit signed price with native Aleo signature verification
     async transition submit_signed_price(
         public pair_id: u64,
         public price: u128,
         public timestamp: u64,
         public source_count: u8,
-        public sig_r: u128,
-        public sig_s: u128,
-        public message_hash: field,
-        public nonce_hash: field
+        public sig: signature
     ) -> Future {
         assert(price > 0u128);
         assert(pair_id > 0u64);
         assert(source_count >= 3u8);
-        assert(sig_r > 0u128);
-        assert(sig_s > 0u128);
+
+        // Hash the price data into a field for verification
+        let message: field = BHP256::hash_to_field(
+            PriceMessage { pair_id, price, timestamp, source_count }
+        );
+
+        // REAL signature verification — native Aleo BLS12-377 crypto
+        assert(signature::verify(sig, self.caller, message));
 
         return finalize_submit_signed_price(
             self.caller,
             pair_id,
             price,
             timestamp,
-            source_count,
-            sig_r,
-            sig_s,
-            message_hash,
-            nonce_hash
+            source_count
         );
     }
 
@@ -475,11 +395,7 @@ program price_oracle_v2.aleo {
         pair_id: u64,
         price: u128,
         timestamp: u64,
-        source_count: u8,
-        sig_r: u128,
-        sig_s: u128,
-        message_hash: field,
-        nonce_hash: field
+        source_count: u8
     ) {
         // Check not paused
         let is_paused: bool = Mapping::get_or_use(paused, 0u8, false);
@@ -493,26 +409,16 @@ program price_oracle_v2.aleo {
         let stake: u64 = Mapping::get_or_use(operator_stakes, operator, 0u64);
         assert(stake >= 1000000000u64);
 
-        // Verify nonce hasn't been used (replay protection)
-        let nonce_used: bool = Mapping::get_or_use(used_nonces, nonce_hash, false);
-        assert(!nonce_used);
-        Mapping::set(used_nonces, nonce_hash, true);
-
-        // Verify signature
-        let operator_key_hash: field = Mapping::get_or_use(operator_keys, operator, 0field);
-        let sig_valid: bool = verify_signature(message_hash, sig_r, sig_s, operator_key_hash);
-        assert(sig_valid);
-
         // Get current round
         let round: ConsensusRound = Mapping::get(current_round, pair_id);
         assert(!round.finalized);
         assert(timestamp <= round.deadline);
 
-        // Check timestamp is not too old or in the future (using ternary for Leo compatibility)
+        // Check timestamp drift
         let time_diff: u64 = timestamp > round.started_at ?
             timestamp - round.started_at :
             round.started_at - timestamp;
-        assert(time_diff <= 300000u64);  // 5 minute max drift
+        assert(time_diff <= 300000u64);
 
         // Check operator hasn't already submitted
         let submission_key: field = BHP256::hash_to_field(pair_id + (round.epoch as u64) * 10000u64 + BHP256::hash_to_u64(operator));
@@ -526,7 +432,7 @@ program price_oracle_v2.aleo {
         let existing: RoundSubmission = Mapping::get_or_use(round_submissions, submission_key, default_sub);
         assert(existing.price == 0u128);
 
-        // Store submission with signature verification status
+        // Store submission — sig_verified is always true (passed signature::verify)
         let submission: RoundSubmission = RoundSubmission {
             operator: operator,
             price: price,
@@ -568,7 +474,6 @@ program price_oracle_v2.aleo {
 
     // ===== CONSENSUS ROUND MANAGEMENT =====
 
-    // Start a new consensus round
     async transition start_round(
         public pair_id: u64,
         public timestamp: u64,
@@ -587,14 +492,11 @@ program price_oracle_v2.aleo {
         let is_paused: bool = Mapping::get_or_use(paused, 0u8, false);
         assert(!is_paused);
 
-        // Get current epoch
         let epoch: u32 = Mapping::get_or_use(global_epoch, 0u8, 1u32);
 
-        // Check pair exists and is active
         let pair: PairInfo = Mapping::get(pairs, pair_id);
         assert(pair.is_active);
 
-        // Check circuit breaker not hard halted
         let default_cb: CircuitBreakerState = CircuitBreakerState {
             is_soft_halted: false,
             is_hard_halted: false,
@@ -610,12 +512,10 @@ program price_oracle_v2.aleo {
         };
         let cb_state: CircuitBreakerState = Mapping::get_or_use(circuit_breaker_state, pair_id, default_cb);
 
-        // If hard halted, check if halt period expired
         if cb_state.is_hard_halted && timestamp < cb_state.halt_until {
-            assert(false);  // Still halted
+            assert(false);
         }
 
-        // Create new round
         let round: ConsensusRound = ConsensusRound {
             pair_id: pair_id,
             epoch: epoch,
@@ -627,7 +527,6 @@ program price_oracle_v2.aleo {
         };
         Mapping::set(current_round, pair_id, round);
 
-        // Reset submission tracking for this round
         let round_key: field = BHP256::hash_to_field(pair_id + (epoch as u64) * 10000u64);
         Mapping::set(submission_counts, round_key, 0u8);
         Mapping::set(weighted_price_sums, round_key, 0u128);
@@ -635,7 +534,7 @@ program price_oracle_v2.aleo {
         Mapping::set(verified_sig_count, epoch, 0u8);
     }
 
-    // Submit price to current round (legacy - no signature)
+    // Submit price to current round (legacy — no signature)
     async transition submit_price(
         public pair_id: u64,
         public price: u128,
@@ -656,24 +555,19 @@ program price_oracle_v2.aleo {
         timestamp: u64,
         source_count: u8
     ) {
-        // Check not paused
         let is_paused: bool = Mapping::get_or_use(paused, 0u8, false);
         assert(!is_paused);
 
-        // Verify operator is registered
         let is_registered: bool = Mapping::get_or_use(registered_operators, operator, false);
         assert(is_registered);
 
-        // Get operator stake
         let stake: u64 = Mapping::get_or_use(operator_stakes, operator, 0u64);
         assert(stake >= 1000000000u64);
 
-        // Get current round
         let round: ConsensusRound = Mapping::get(current_round, pair_id);
         assert(!round.finalized);
         assert(timestamp <= round.deadline);
 
-        // Check operator hasn't already submitted
         let submission_key: field = BHP256::hash_to_field(pair_id + (round.epoch as u64) * 10000u64 + BHP256::hash_to_u64(operator));
         let default_sub: RoundSubmission = RoundSubmission {
             operator: aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc,
@@ -685,7 +579,6 @@ program price_oracle_v2.aleo {
         let existing: RoundSubmission = Mapping::get_or_use(round_submissions, submission_key, default_sub);
         assert(existing.price == 0u128);
 
-        // Store submission (without signature verification)
         let submission: RoundSubmission = RoundSubmission {
             operator: operator,
             price: price,
@@ -695,7 +588,6 @@ program price_oracle_v2.aleo {
         };
         Mapping::set(round_submissions, submission_key, submission);
 
-        // Update round aggregates
         let round_key: field = BHP256::hash_to_field(pair_id + (round.epoch as u64) * 10000u64);
 
         let current_count: u8 = Mapping::get_or_use(submission_counts, round_key, 0u8);
@@ -708,7 +600,6 @@ program price_oracle_v2.aleo {
         let current_stake_sum: u64 = Mapping::get_or_use(stake_weight_sums, round_key, 0u64);
         Mapping::set(stake_weight_sums, round_key, current_stake_sum + stake);
 
-        // Update round
         let updated_round: ConsensusRound = ConsensusRound {
             pair_id: round.pair_id,
             epoch: round.epoch,
@@ -736,24 +627,19 @@ program price_oracle_v2.aleo {
         let round: ConsensusRound = Mapping::get(current_round, pair_id);
         assert(!round.finalized);
 
-        // Get config
         let cb_config: CircuitBreakerConfig = Mapping::get(circuit_breaker_config, 0u8);
 
-        // Need minimum operators
         let round_key: field = BHP256::hash_to_field(pair_id + (round.epoch as u64) * 10000u64);
         let submission_count: u8 = Mapping::get_or_use(submission_counts, round_key, 0u8);
         assert(submission_count >= cb_config.min_operators);
 
-        // Calculate stake-weighted average price
         let weighted_sum: u128 = Mapping::get_or_use(weighted_price_sums, round_key, 0u128);
         let stake_sum: u64 = Mapping::get_or_use(stake_weight_sums, round_key, 1u64);
         let final_price: u128 = weighted_sum / (stake_sum as u128);
 
-        // Check verified signature count
         let verified_count: u8 = Mapping::get_or_use(verified_sig_count, round.epoch, 0u8);
         let all_verified: bool = verified_count >= submission_count;
 
-        // Get previous price for circuit breaker check
         let default_cb_state: CircuitBreakerState = CircuitBreakerState {
             is_soft_halted: false,
             is_hard_halted: false,
@@ -777,10 +663,8 @@ program price_oracle_v2.aleo {
 
             let change_bp: u128 = (price_diff * 10000u128) / cb_state.last_price;
 
-            // Check 1-minute threshold
             let time_since_last: u64 = timestamp - cb_state.last_timestamp;
             if time_since_last <= 60000u64 && change_bp > (cb_config.max_price_change_1m as u128) {
-                // Trip circuit breaker
                 let new_cb_state: CircuitBreakerState = CircuitBreakerState {
                     is_soft_halted: false,
                     is_hard_halted: true,
@@ -795,10 +679,9 @@ program price_oracle_v2.aleo {
                     last_trip_reason: 1u8
                 };
                 Mapping::set(circuit_breaker_state, pair_id, new_cb_state);
-                assert(false);  // Reject this round
+                assert(false);
             }
 
-            // Check 1-hour threshold
             if cb_state.price_1h_ago > 0u128 {
                 let price_diff_1h: u128 = final_price > cb_state.price_1h_ago ?
                     final_price - cb_state.price_1h_ago :
@@ -806,7 +689,6 @@ program price_oracle_v2.aleo {
                 let change_bp_1h: u128 = (price_diff_1h * 10000u128) / cb_state.price_1h_ago;
 
                 if change_bp_1h > (cb_config.max_price_change_1h as u128) {
-                    // Soft halt for 1h threshold breach
                     let new_cb_state: CircuitBreakerState = CircuitBreakerState {
                         is_soft_halted: true,
                         is_hard_halted: false,
@@ -826,13 +708,11 @@ program price_oracle_v2.aleo {
             }
         }
 
-        // Calculate confidence score (based on operator count, stake, and signature verification)
         let base_confidence: u64 = (submission_count as u64) * 1000u64;
-        let sig_bonus: u64 = all_verified ? 2000u64 : 0u64;  // 20% bonus for all verified signatures
+        let sig_bonus: u64 = all_verified ? 2000u64 : 0u64;
         let raw_confidence: u64 = base_confidence + sig_bonus;
         let confidence: u64 = raw_confidence > 10000u64 ? 10000u64 : raw_confidence;
 
-        // Create consensus price
         let consensus: ConsensusPrice = ConsensusPrice {
             price: final_price,
             median_price: final_price,
@@ -847,7 +727,6 @@ program price_oracle_v2.aleo {
         };
         Mapping::set(consensus_prices, pair_id, consensus);
 
-        // Update circuit breaker state
         let new_cb_state: CircuitBreakerState = CircuitBreakerState {
             is_soft_halted: false,
             is_hard_halted: false,
@@ -863,7 +742,6 @@ program price_oracle_v2.aleo {
         };
         Mapping::set(circuit_breaker_state, pair_id, new_cb_state);
 
-        // Store in history
         let hist_idx: u64 = Mapping::get_or_use(history_index, pair_id, 0u64);
         let history_key: u64 = pair_id * 1000u64 + (hist_idx % 100u64);
         let hist_entry: HistoricalPrice = HistoricalPrice {
@@ -875,7 +753,6 @@ program price_oracle_v2.aleo {
         Mapping::set(price_history, history_key, hist_entry);
         Mapping::set(history_index, pair_id, hist_idx + 1u64);
 
-        // Update round as finalized
         let finalized_round: ConsensusRound = ConsensusRound {
             pair_id: round.pair_id,
             epoch: round.epoch,
@@ -887,17 +764,15 @@ program price_oracle_v2.aleo {
         };
         Mapping::set(current_round, pair_id, finalized_round);
 
-        // Increment global epoch
         let current_epoch: u32 = Mapping::get_or_use(global_epoch, 0u8, 1u32);
         Mapping::set(global_epoch, 0u8, current_epoch + 1u32);
 
-        // Update stats
         let updates: u64 = Mapping::get_or_use(update_count, pair_id, 0u64);
         Mapping::set(update_count, pair_id, updates + 1u64);
         Mapping::set(last_update, pair_id, timestamp);
     }
 
-    // ===== SIMPLIFIED SINGLE-OPERATOR SUBMISSION (for backwards compatibility) =====
+    // ===== SIMPLIFIED SINGLE-OPERATOR SUBMISSION (bypasses rounds) =====
 
     async transition submit_price_simple(
         public pair_id: u64,
@@ -916,18 +791,14 @@ program price_oracle_v2.aleo {
         price: u128,
         timestamp: u64
     ) {
-        // Check not paused
         let is_paused: bool = Mapping::get_or_use(paused, 0u8, false);
         assert(!is_paused);
 
-        // Verify operator
         let is_registered: bool = Mapping::get_or_use(registered_operators, operator, false);
         assert(is_registered);
 
-        // Get operator stake for weight
         let stake: u64 = Mapping::get_or_use(operator_stakes, operator, 1000000000u64);
 
-        // Get circuit breaker config and state
         let cb_config: CircuitBreakerConfig = Mapping::get(circuit_breaker_config, 0u8);
         let default_cb: CircuitBreakerState = CircuitBreakerState {
             is_soft_halted: false,
@@ -944,7 +815,6 @@ program price_oracle_v2.aleo {
         };
         let cb_state: CircuitBreakerState = Mapping::get_or_use(circuit_breaker_state, pair_id, default_cb);
 
-        // Check circuit breaker
         if cb_config.enabled {
             if cb_state.is_hard_halted && timestamp < cb_state.halt_until {
                 assert(false);
@@ -978,10 +848,8 @@ program price_oracle_v2.aleo {
             }
         }
 
-        // Get current epoch
         let epoch: u32 = Mapping::get_or_use(global_epoch, 0u8, 1u32);
 
-        // Store consensus price directly (single operator mode - lower confidence)
         let consensus: ConsensusPrice = ConsensusPrice {
             price: price,
             median_price: price,
@@ -991,12 +859,11 @@ program price_oracle_v2.aleo {
             epoch: epoch,
             operator_count: 1u8,
             total_stake_weight: stake,
-            confidence_score: 5000u64,  // 50% confidence for single operator
-            all_sigs_verified: false    // No signature verification in simple mode
+            confidence_score: 5000u64,
+            all_sigs_verified: false
         };
         Mapping::set(consensus_prices, pair_id, consensus);
 
-        // Update circuit breaker state
         let new_cb: CircuitBreakerState = CircuitBreakerState {
             is_soft_halted: false,
             is_hard_halted: false,
@@ -1012,7 +879,6 @@ program price_oracle_v2.aleo {
         };
         Mapping::set(circuit_breaker_state, pair_id, new_cb);
 
-        // Store in history
         let hist_idx: u64 = Mapping::get_or_use(history_index, pair_id, 0u64);
         let history_key: u64 = pair_id * 1000u64 + (hist_idx % 100u64);
         let hist: HistoricalPrice = HistoricalPrice {
@@ -1024,10 +890,8 @@ program price_oracle_v2.aleo {
         Mapping::set(price_history, history_key, hist);
         Mapping::set(history_index, pair_id, hist_idx + 1u64);
 
-        // Increment epoch
         Mapping::set(global_epoch, 0u8, epoch + 1u32);
 
-        // Update stats
         let updates: u64 = Mapping::get_or_use(update_count, pair_id, 0u64);
         Mapping::set(update_count, pair_id, updates + 1u64);
         Mapping::set(last_update, pair_id, timestamp);
@@ -1035,7 +899,6 @@ program price_oracle_v2.aleo {
 
     // ===== PRICE STALENESS CHECK =====
 
-    // Check if a price is stale (for external contracts to verify)
     async transition check_price_staleness(
         public pair_id: u64,
         public current_timestamp: u64,
@@ -1051,8 +914,6 @@ program price_oracle_v2.aleo {
     ) {
         let last_ts: u64 = Mapping::get_or_use(last_update, pair_id, 0u64);
         let age: u64 = current_timestamp - last_ts;
-
-        // Assert price is not stale
         assert(age <= max_age);
     }
 
@@ -1162,7 +1023,6 @@ program price_oracle_v2.aleo {
         Mapping::set(circuit_breaker_config, 0u8, new_config);
     }
 
-    // Resume halted pair
     async transition resume_circuit_breaker(public pair_id: u64) -> Future {
         return finalize_resume_cb(self.caller, pair_id);
     }
@@ -1223,9 +1083,3 @@ program price_oracle_v2.aleo {
         Mapping::set(admin, 0u8, new_admin);
     }
 }
-
-
-// ============================================================================
-//   Aleo Oracle Protocol - On-Chain Signature Verification
-//   Powered by Aleo Zero-Knowledge Cryptography
-// ============================================================================

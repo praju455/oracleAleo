@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
-import { Chatbot } from '@/components/Chatbot';
 import { PriceChart } from '@/components/PriceChart';
 import { oracleAPI, AnalysisResponse, PriceData } from '@/services/oracleAPI';
 
@@ -42,7 +41,6 @@ export default function TokenAnalysisPage() {
   const token = pair.split('/')[0];
 
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
-  const [prices, setPrices] = useState<PriceData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState<'1m' | '5m' | '15m' | '1h'>('5m');
@@ -50,12 +48,8 @@ export default function TokenAnalysisPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [analysisData, allPrices] = await Promise.all([
-        oracleAPI.getAnalysis(pair),
-        oracleAPI.getAllPrices()
-      ]);
+      const analysisData = await oracleAPI.getAnalysis(pair);
       setAnalysis(analysisData);
-      setPrices(allPrices.prices);
       setError(null);
     } catch (err) {
       console.error('Failed to fetch analysis:', err);
@@ -377,29 +371,18 @@ export default function TokenAnalysisPage() {
             {/* Quick Actions */}
             <div className="space-y-3">
               <Link
-                href="/borrow"
-                className="w-full glass-button py-3 rounded-xl font-medium text-white flex items-center justify-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Borrow with {token}
-              </Link>
-              <Link
                 href="/stake"
                 className="w-full py-3 rounded-xl font-medium text-white bg-white/5 hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                 </svg>
-                Stake & Earn
+                Operator Dashboard
               </Link>
             </div>
           </div>
         </div>
       </main>
-
-      <Chatbot prices={prices} />
     </div>
   );
 }
